@@ -2,6 +2,14 @@
 
 Este proyecto reemplaza al anterior cuando se complete el corte. No necesita Railway. No ejecutar la importación real hasta que el dueño lo pida.
 
+## Despliegue actual · 24/10/2026
+- Aplicación: https://kiosco-sistema-beta.vercel.app
+- Vercel: equipo fmcodes-projects, proyecto kiosco-sistema, región de funciones gru1.
+- GitHub conectado: fedemarr/kiosco-sistema, rama main.
+- Supabase conectado con TLS verificado y cuatro migraciones aplicadas; secretos solo en producción. La cuenta dueña pedida ya está creada. La importación histórica sigue pendiente.
+- Verificados health, login, cookies seguras, acceso a Usuarios y tres turnos; interfaz de celular/escritorio sin errores de JavaScript ni scroll horizontal.
+- vercel.json fija Next.js, npm ci, migraciones antes del build y región. .vercelignore limita los archivos subidos para excluir datos privados y entornos locales.
+
 ## 1. Crear PostgreSQL en Supabase
 1. Crear un proyecto dedicado, elegir una región cercana a los usuarios y guardar la contraseña de DB en un gestor seguro.
 2. En Connect, copiar la URL del **transaction pooler** para `DATABASE_URL` (puerto 6543) y la conexión directa o **session pooler** para `DIRECT_URL` (5432). URL-encodear caracteres especiales de la contraseña y quitar los corchetes que sean parte del ejemplo del panel. El proyecto incluye la CA pública de Supabase y verifica certificado y hostname; prisma.config.ts agrega la CA al motor de migraciones. No desactivar la verificación TLS.

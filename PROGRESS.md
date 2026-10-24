@@ -11,7 +11,7 @@ Sistema nuevo con Node/Next.js, Supabase y Vercel, sin Railway. Leídos completo
 - **4 — Reportes implementados:** resumen, medios de pago, costo/ganancia, top productos, evolución/proyección, turnos por fecha de negocio y empleado, detalle, ticket promedio, solicitudes, auditoría con filtros y exportación Excel. Anulaciones excluidas. Rango máximo 93 días y 1.000 turnos, con aviso al alcanzar el límite.
 - **5 — PWA/offline implementados:** iconos, manifest, shell público para reapertura sin red, catálogo local sin costos, cola IndexedDB, autorización firmada por usuario/turno, reintentos con misma clave y sincronización al reconectar y periódica. Rechazos por stock/precio/turno guardados en DB para el dueño, con resolución auditada. API y documentos autenticados nunca cacheados. Refresco al volver al primer plano; stock cada 15 segundos.
 - **6 — Importación histórica pospuesta:** no se ejecutó ni desarrolló importador de JSON/pg_dump antiguos. La importación Excel operativa está disponible y probada con archivo sintético. No se importaron productos, usuarios ni ventas anteriores.
-- **7 — Publicación en Vercel en curso:** Supabase con TLS verificado, cuatro migraciones aplicadas y RLS en todas las tablas. Base con 0 productos, 1 dueño creado por pedido explícito y 0 operaciones; 10 categorías y 3 botones rápidos. Proyecto Vercel kiosco-sistema creado en fmcodes-projects, variables de producción cargadas como secretos y región gru1. Paquete de despliegue revisado: no contiene .env ni datos originales. URL asignada: https://kiosco-sistema-beta.vercel.app. Falta terminar build remoto y verificar acceso público.
+- **7 — Publicado y verificado:** https://kiosco-sistema-beta.vercel.app, proyecto kiosco-sistema en fmcodes-projects, funciones en gru1 y repositorio GitHub conectado para próximos despliegues. Supabase con TLS verificado, cuatro migraciones aplicadas y RLS en todas las tablas. Cuenta de dueño creada por pedido explícito, con administración de usuarios. Variables privadas cargadas como secretos de producción y clave de sesión propia. Build remoto terminado; health 200, rutas privadas 401 sin sesión, login real, cookies Secure/httpOnly y acceso a Usuarios verificados. Navegador probado a 390×844 y 1440×900, sin desborde ni errores de JavaScript; selector con mañana/tarde/noche confirmado. Catálogo anterior sin importar.
 
 ## Verificación
 - TypeScript estricto, tipos de rutas Next, lint y build de producción.
@@ -20,15 +20,16 @@ Sistema nuevo con Node/Next.js, Supabase y Vercel, sin Railway. Leídos completo
 - Dependencias revisadas con npm audit: sin vulnerabilidades reportadas. Se sustituyó xlsx por ExcelJS con uuid corregido mediante override.
 - Tests/fixtures exclusivamente en kiosco_test local. Supabase verificado con consultas de solo lectura después del setup.
 - Capturas inspeccionadas en .screenshots (no versionadas). Falta validación manual en un celular físico del kiosco.
+- Despliegue público probado por HTTP y navegador contra Supabase real, sin crear productos, turnos ni ventas de prueba. Capturas del despliegue en .screenshots/vercel-caja-mobile.png y vercel-usuarios-desktop.png. Paquete Vercel validado antes de subir: sin .env ni archivos de migración de datos originales.
 
 ## Probar desde esta carpeta
 1. `.env` ya tiene la conexión de Supabase entregada por el dueño; no copiarla a Git. Respaldo del entorno local en `.env.local-backup`, ignorado.
 2. `npm ci` y `npm run db:verify`.
-3. `npm run crear-dueno` en una terminal interactiva. Elegir nombre, usuario y contraseña propia (oculta y confirmada).
+3. La cuenta dueña solicitada ya está creada en Supabase. Para otra base vacía, `npm run crear-dueno` permite elegir usuario y contraseña de forma interactiva.
 4. `npm run dev`, abrir http://localhost:3000 e ingresar. Abrir turno, crear producto en Stock y cargar unidades mediante Cargar.
 5. Para tests, iniciar `npm run db:local` o Docker. TEST_DATABASE_URL apunta a kiosco_test local. Ejecutar `npm run lint`, `npm run typecheck`, `npm run test:db`.
 6. `npm run build`; en PowerShell `$env:E2E_PRODUCTION='1'`; `npm run test:e2e`. Puerto de pruebas 3100, separado de 3000.
-7. Para publicar: docs/DEPLOY.md. Configurar secretos en Vercel y APP_URL con dominio definitivo.
+7. Ya publicado en https://kiosco-sistema-beta.vercel.app. APP_URL coincide con ese dominio; para cambiarlo, seguir docs/DEPLOY.md y volver a desplegar.
 
 ## Decisiones y límites explícitos
 - Monolito modular: API Node de Next.js; sin servidor Express aparte. Supabase como Postgres privado; no necesita email, anon key ni service_role.
