@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import bcrypt from 'bcryptjs';
 import { db } from '../src/lib/db';
+import { money } from '../src/lib/format';
 const password = `Test-${crypto.randomUUID()}`;
 let ownerId: string;
 let sellerId: string;
@@ -250,7 +251,20 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
   await page.getByLabel('Buscar producto').fill(barcode);
   await page.getByLabel('Buscar producto').press('Enter');
   await expect(page.locator('.pos-cart-row .quantity span')).toHaveText('2');
-  await page.getByRole('radio', { name: 'Mercado Pago', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Confirmar cobro' })).toBeDisabled();
+  const quotation = await page.request.post('/api/sales/quote', {
+    headers: { Origin: baseURL! },
+    data: { type: 'SALE', items: [{ kind: 'product', productId, quantity: 2 }] },
+  });
+  const quoteData = (await quotation.json()).data;
+  await page
+    .getByLabel('Efectivo recibido ($)', { exact: true })
+    .fill(String((quoteData.total + 50000) / 100));
+  await expect(page.locator('.pos-payment-fields')).toContainText('Vuelto');
+  await expect(page.locator('.pos-payment-fields')).toContainText(money(50000));
+  await expect(page.getByRole('button', { name: 'Confirmar cobro' })).toBeEnabled();
+  await page.getByRole('radio', { name: 'Mixto', exact: true }).click();
+  await page.getByLabel('Parte en efectivo ($)', { exact: true }).fill('0');
   let saleDelivered!: () => void;
   const lostSale = new Promise<void>((resolve) => {
     saleDelivered = resolve;

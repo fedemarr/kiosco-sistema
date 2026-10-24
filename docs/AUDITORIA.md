@@ -8,6 +8,7 @@
 - Cargar mercadería tiene una clave única persistida y hash de solicitud. El mismo reintento devuelve el movimiento original; cambiar sus datos con la misma clave se rechaza. La intención se guarda en IndexedDB antes de enviar y se puede confirmar después de recargar el navegador.
 - El cobro guarda su clave e intención antes del POST. Una respuesta perdida o recarga conserva esa clave y sincroniza una sola operación. Los rechazos confirmados liberan la intención; una falla de almacenamiento impide enviarla. El carrito se bloquea mientras se cobra.
 - Lecturas rápidas consecutivas del escáner se procesan independientemente, limpiando la entrada al recibir Enter y esperando las búsquedas pendientes antes de cobrar.
+- El botón de cobro exige efectivo suficiente e importes válidos. Mixto permite parte efectivo cero cuando el total se paga por MP, sin exigir un billete recibido ficticio. Se verifican también el vuelto y los centavos en el navegador.
 
 ## Controles de los errores anteriores
 

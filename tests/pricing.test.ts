@@ -53,6 +53,12 @@ describe('precios en centavos y horario argentino', () => {
   });
   it('acepta mixto exacto, no acepta efectivo insuficiente', () => {
     expect(() =>
+      validatePayments(10000, 'SALE', [
+        { method: 'CASH', amount: 0 },
+        { method: 'MP', amount: 10000 },
+      ]),
+    ).not.toThrow();
+    expect(() =>
       validatePayments(
         10000,
         'SALE',

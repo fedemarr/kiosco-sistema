@@ -43,6 +43,6 @@ export function validatePayments(
   )
     throw new AppError('Los importes de los pagos deben sumar exactamente el total.');
   const cash = payments.find((p) => p.method === 'CASH')?.amount;
-  if (cash !== undefined && (received === undefined || received < cash))
+  if (cash !== undefined && cash > 0 && (received === undefined || received < cash))
     throw new AppError('El efectivo recibido no alcanza para cobrar.');
 }

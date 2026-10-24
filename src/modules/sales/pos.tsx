@@ -268,7 +268,7 @@ function usePos() {
           : [{ method: method as Payment['method'], amount: total }];
     if (
       payments.some((p) => !Number.isInteger(p.amount) || p.amount < 0) ||
-      (cashAmount > 0 && change < 0)
+      (cashAmount > 0 && (!Number.isFinite(change) || change < 0))
     ) {
       setError('Revisá los importes: el efectivo recibido debe alcanzar.');
       setBusy(false);

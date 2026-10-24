@@ -321,6 +321,7 @@ export function PosScreen({
                     min="0"
                     step="0.01"
                     value={m.cash}
+                    aria-label="Parte en efectivo ($)"
                     disabled={m.busy}
                     onChange={(e) => m.setCash(e.target.value)}
                   />
@@ -340,6 +341,7 @@ export function PosScreen({
                       min="0"
                       step="0.01"
                       value={m.received}
+                      aria-label="Efectivo recibido ($)"
                       disabled={m.busy}
                       onChange={(e) => m.setReceived(e.target.value)}
                       placeholder="0"
@@ -370,6 +372,11 @@ export function PosScreen({
               m.scanning > 0 ||
               !m.shift ||
               !m.lines.length ||
+              (m.type !== 'OWNER' &&
+                (!Number.isFinite(m.cashAmount) ||
+                  m.cashAmount < 0 ||
+                  m.cashAmount > m.total ||
+                  (m.cashAmount > 0 && (!Number.isFinite(m.change) || m.change < 0)))) ||
               (!m.quoteValid && !m.offlineReady) ||
               (m.type === 'OWNER' && !m.note.trim())
             }
