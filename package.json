@@ -19,6 +19,7 @@
     "db:seed": "prisma db seed",
     "crear-dueno": "tsx scripts/crear-dueno.ts",
     "migrar": "tsx scripts/migrar.ts",
+    "verificar:integridad": "tsx scripts/verificar-integridad.ts",
     "postinstall": "prisma generate"
   },
   "keywords": [],

@@ -6,7 +6,7 @@ import { money, isNight, toCents, nextTariffDelay } from '@/lib/format';
 import type { Product, ProductList, Quick, Category, Quotation, Shift, Payment } from '@/lib/types';
 import type { CartInput, CheckoutInput } from './schema';
 import { useUser } from '@/components/app-shell';
-import { enqueue } from '@/modules/offline/queue';
+import { enqueue, removePendingSale } from '@/modules/offline/queue';
 import { cacheCatalog, readSnapshot, saveSnapshot, warmCatalog } from '@/modules/offline/catalog';
 type Line = {
   key: string;
@@ -37,6 +37,8 @@ function usePos() {
   const [received, setReceived] = useState('');
   const [night, setNight] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(0);
+  const scanCount = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -45,6 +47,8 @@ function usePos() {
   const [refreshKey, setRefreshKey] = useState(0);
   const warmed = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const chargeLock = useRef(false);
+  const lastRequest = useRef<{ key: string; confirmed: boolean } | null>(null);
   const bindSearch = useCallback((node: HTMLInputElement | null) => {
     searchRef.current = node;
   }, []);
@@ -61,6 +65,7 @@ function usePos() {
   };
   const cartKey = JSON.stringify(cart);
   const add = useCallback((line: Omit<Line, 'quantity'>) => {
+    if (chargeLock.current) return;
     setLines((old) => {
       const match = old.find((l) => l.key === line.key);
       return match
@@ -113,15 +118,26 @@ function usePos() {
       setRefreshKey((key) => key + 1);
       void load();
     };
+    const confirmed = (event: Event) => {
+      const { key, id } = (event as CustomEvent<{ key: string; id: string }>).detail;
+      if (lastRequest.current?.key === key) {
+        lastRequest.current.confirmed = true;
+        setMessage(`Cobro sincronizado y confirmado · ${id.slice(0, 8)}`);
+      }
+    };
     const interval = setInterval(changed, 15000);
     window.addEventListener('offline', offline);
     window.addEventListener('queue-change', changed);
+    window.addEventListener('stock-change', changed);
+    window.addEventListener('sale-confirmed', confirmed);
     document.addEventListener('visibilitychange', visibility);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('online', visibility);
       window.removeEventListener('offline', offline);
       window.removeEventListener('queue-change', changed);
+      window.removeEventListener('stock-change', changed);
+      window.removeEventListener('sale-confirmed', confirmed);
       clearInterval(interval);
       document.removeEventListener('visibilitychange', visibility);
     };
@@ -235,7 +251,9 @@ function usePos() {
     type === 'OWNER' ? 0 : method === 'MIXED' ? toCents(cash) : method === 'CASH' ? total : 0;
   const change = toCents(received || '0') - cashAmount;
   async function charge() {
-    if ((!quoteValid && !offlineReady) || !shift) return;
+    if (chargeLock.current || scanCount.current > 0 || (!quoteValid && !offlineReady) || !shift)
+      return;
+    chargeLock.current = true;
     setBusy(true);
     setError('');
     setMessage('');
@@ -254,6 +272,7 @@ function usePos() {
     ) {
       setError('Revisá los importes: el efectivo recibido debe alcanzar.');
       setBusy(false);
+      chargeLock.current = false;
       return;
     }
     const payload: CheckoutInput = {
@@ -267,8 +286,19 @@ function usePos() {
       ...(cashAmount > 0 ? { received: toCents(received) } : {}),
     };
     try {
+      // Guardar la clave antes de enviar: una recarga o respuesta perdida conserva el mismo cobro.
+      lastRequest.current = { key: payload.idempotencyKey, confirmed: false };
+      await enqueue(user.id, payload);
+    } catch {
+      setError(
+        'No se pudo guardar el cobro de forma segura en este dispositivo. No se envió al servidor. Conservá el carrito y revisá el almacenamiento del navegador.',
+      );
+      setBusy(false);
+      chargeLock.current = false;
+      return;
+    }
+    try {
       if (offlineReady) {
-        await enqueue(user.id, payload);
         setMessage(
           'Cobro guardado como pendiente en este dispositivo. Todavía no está confirmado. Se validarán precio, turno y stock al sincronizar.',
         );
@@ -279,6 +309,7 @@ function usePos() {
         return;
       }
       const result = await request<{ id: string }>('sales', 'POST', payload);
+      await removePendingSale(payload.idempotencyKey).catch(() => {});
       setMessage(`Cobro registrado · ${result.id.slice(0, 8)} · ${money(total)}`);
       setLines([]);
       setReceived('');
@@ -287,40 +318,54 @@ function usePos() {
       void load();
     } catch (e) {
       if (e instanceof ApiError && (e.code === 'NETWORK' || (e.status && e.status >= 500))) {
-        try {
-          await enqueue(user.id, payload);
-          setMessage(
-            'Cobro guardado como pendiente en este dispositivo. Todavía no está confirmado. Conservá el dispositivo y sincronizá al volver la conexión.',
-          );
-          setLines([]);
-          setReceived('');
-          setCash('');
-        } catch {
-          setError(
-            'No se pudo guardar en el dispositivo. Conservá el carrito y verificá el cobro con el dueño.',
-          );
-        }
-      } else if (e instanceof ApiError && e.code === 'QUOTE_CHANGED') {
-        const next = (e.details as { quote: Quotation }).quote;
-        setQuotation(next);
-        setQuoteKey(cartKey);
-        setError(
-          `El total cambió de ${money(total)} a ${money(next.total)}. ${next.total > total ? `Cobrá ${money(next.total - total)} más` : `Devolvé ${money(total - next.total)}`}. Revisá el pago y confirmá otra vez.`,
+        setMessage(
+          lastRequest.current?.confirmed
+            ? 'Cobro sincronizado y confirmado.'
+            : 'Cobro guardado como pendiente en este dispositivo. Todavía no está confirmado. Conservá el dispositivo y sincronizá al volver la conexión.',
         );
-      } else setError(errorMessage(e));
+        setLines([]);
+        setReceived('');
+        setCash('');
+      } else {
+        try {
+          await removePendingSale(payload.idempotencyKey);
+        } catch {
+          setLines([]);
+          setMessage(
+            'Cobro pendiente de revisión en este dispositivo. Verificá su estado antes de repetirlo.',
+          );
+          return;
+        }
+        if (e instanceof ApiError && e.code === 'QUOTE_CHANGED') {
+          const next = (e.details as { quote: Quotation }).quote;
+          setQuotation(next);
+          setQuoteKey(cartKey);
+          setError(
+            `El total cambió de ${money(total)} a ${money(next.total)}. ${next.total > total ? `Cobrá ${money(next.total - total)} más` : `Devolvé ${money(total - next.total)}`}. Revisá el pago y confirmá otra vez.`,
+          );
+        } else setError(errorMessage(e));
+      }
     } finally {
       setBusy(false);
+      chargeLock.current = false;
     }
   }
-  function addProduct(p: Product) {
+  function addProduct(p: Product, clearSearch = true) {
+    if (chargeLock.current) return;
     add({ kind: 'product', key: p.id, productId: p.id, name: p.name, price: p.price });
-    setSearch('');
-    setPage(1);
+    if (clearSearch) {
+      setSearch('');
+      setPage(1);
+    }
   }
   async function scan() {
-    if (!search.trim()) return;
+    if (!search.trim() || chargeLock.current) return;
+    const query = search.trim();
+    setSearch('');
+    setProducts([]);
+    scanCount.current++;
+    setScanning(scanCount.current);
     try {
-      const query = search.trim();
       const candidates = online
         ? (await request<ProductList>('catalog?q=' + encodeURIComponent(query))).products
         : ((await readSnapshot(user.id))?.products || []).filter(
@@ -331,10 +376,13 @@ function usePos() {
       const p =
         candidates.find((p) => p.barcode.toLowerCase() === query.toLowerCase()) ||
         (candidates.length === 1 ? candidates[0] : undefined);
-      if (p) addProduct(p);
+      if (p) addProduct(p, false);
       else setError('Elegí un producto de los resultados o revisá el código.');
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      scanCount.current--;
+      setScanning(scanCount.current);
     }
   }
   return {
@@ -369,6 +417,7 @@ function usePos() {
     setReceived,
     night,
     busy,
+    scanning,
     loading,
     error,
     setError,

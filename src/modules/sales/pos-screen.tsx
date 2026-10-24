@@ -47,9 +47,14 @@ export function PosScreen({
             <small>{m.user.name}</small>
           </div>
           <div className="pos-actions row">
-            {m.type !== 'SALE' && <button onClick={() => m.setType('SALE')}>Volver a venta</button>}
+            {m.type !== 'SALE' && (
+              <button disabled={m.busy} onClick={() => m.setType('SALE')}>
+                Volver a venta
+              </button>
+            )}
             <button
               className={m.type === 'EMPLOYEE' ? 'primary' : ''}
+              disabled={m.busy}
               onClick={() => m.setType(m.type === 'EMPLOYEE' ? 'SALE' : 'EMPLOYEE')}
             >
               <UserRound size={16} /> Mi consumo
@@ -57,12 +62,20 @@ export function PosScreen({
             {can(m.user, 'owner') && (
               <button
                 className={m.type === 'OWNER' ? 'primary' : ''}
+                disabled={m.busy}
                 onClick={() => m.setType(m.type === 'OWNER' ? 'SALE' : 'OWNER')}
               >
                 <ShoppingBag size={16} /> Retiro
               </button>
             )}
-            <Link href="/turnos" className={`pos-shift-link ${m.shift ? 'danger' : 'primary'}`}>
+            <Link
+              href="/turnos"
+              aria-disabled={m.busy}
+              onClick={(e) => {
+                if (m.busy) e.preventDefault();
+              }}
+              className={`pos-shift-link ${m.shift ? 'danger' : 'primary'}`}
+            >
               {m.shift ? 'Cerrar turno' : 'Abrir turno'}
             </Link>
           </div>
@@ -88,6 +101,7 @@ export function PosScreen({
         <div className="pos-searchbar">
           <input
             ref={inputRef}
+            disabled={m.busy}
             autoFocus
             aria-label="Buscar producto"
             placeholder="Escaneá código o buscá por nombre..."
@@ -106,12 +120,14 @@ export function PosScreen({
           <button
             className="primary"
             aria-label="Venta rápida"
+            disabled={m.busy}
             aria-expanded={m.custom}
             onClick={() => m.setCustom(!m.custom)}
           >
             <Plus size={21} />
           </button>
         </div>
+        {!!m.scanning && <small>Procesando {m.scanning} código(s)…</small>}
         {m.search.trim() && (
           <section className="pos-results card stack" aria-label="Resultados de búsqueda">
             <div className="row between">
@@ -122,7 +138,7 @@ export function PosScreen({
               <button
                 className="product-tile"
                 key={p.id}
-                disabled={p.trackStock && p.stock <= 0}
+                disabled={m.busy || (p.trackStock && p.stock <= 0)}
                 onClick={() => m.addProduct(p)}
               >
                 <span>
@@ -163,6 +179,7 @@ export function PosScreen({
               {m.quick.map((q) => (
                 <button
                   key={q.id}
+                  disabled={m.busy}
                   onClick={() =>
                     m.add({ kind: 'quick', key: q.id, quickId: q.id, name: q.name, price: q.price })
                   }
@@ -175,6 +192,7 @@ export function PosScreen({
               className="fields"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (m.busy) return;
                 const d = new FormData(e.currentTarget);
                 const price = toCents(String(d.get('price')));
                 if (!Number.isInteger(price) || price <= 0) {
@@ -192,13 +210,22 @@ export function PosScreen({
             >
               <label>
                 Descripción
-                <input name="name" required minLength={2} maxLength={100} />
+                <input disabled={m.busy} name="name" required minLength={2} maxLength={100} />
               </label>
               <label>
                 Precio ($)
-                <input name="price" type="number" min="0.01" step="0.01" required />
+                <input
+                  disabled={m.busy}
+                  name="price"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  required
+                />
               </label>
-              <button className="primary">Agregar al carrito</button>
+              <button disabled={m.busy} className="primary">
+                Agregar al carrito
+              </button>
             </form>
           </section>
         )}
@@ -218,6 +245,7 @@ export function PosScreen({
               <div className="quantity row">
                 <button
                   aria-label={`Restar ${l.name}`}
+                  disabled={m.busy}
                   onClick={() =>
                     m.setLines((old) =>
                       old
@@ -231,6 +259,7 @@ export function PosScreen({
                 <span>{l.quantity}</span>
                 <button
                   aria-label={`Sumar ${l.name}`}
+                  disabled={m.busy}
                   onClick={() =>
                     m.setLines((old) =>
                       old.map((i) => (i.key === l.key ? { ...i, quantity: i.quantity + 1 } : i)),
@@ -243,6 +272,7 @@ export function PosScreen({
               <strong>{money(l.price * l.quantity)}</strong>
               <button
                 aria-label={`Quitar ${l.name}`}
+                disabled={m.busy}
                 className="danger"
                 onClick={() => m.setLines((old) => old.filter((i) => i.key !== l.key))}
               >
@@ -256,13 +286,19 @@ export function PosScreen({
           {m.type === 'OWNER' ? (
             <label>
               Motivo del retiro
-              <input value={m.note} onChange={(e) => m.setNote(e.target.value)} required />
+              <input
+                disabled={m.busy}
+                value={m.note}
+                onChange={(e) => m.setNote(e.target.value)}
+                required
+              />
             </label>
           ) : (
             <div className="pos-methods" role="radiogroup" aria-label="Medio de pago">
               {methods.map((method) => (
                 <button
                   role="radio"
+                  disabled={m.busy}
                   aria-checked={m.method === method.id}
                   className={m.method === method.id ? 'selected' : ''}
                   onClick={() => m.setMethod(method.id)}
@@ -285,6 +321,7 @@ export function PosScreen({
                     min="0"
                     step="0.01"
                     value={m.cash}
+                    disabled={m.busy}
                     onChange={(e) => m.setCash(e.target.value)}
                   />
                   <small>
@@ -303,6 +340,7 @@ export function PosScreen({
                       min="0"
                       step="0.01"
                       value={m.received}
+                      disabled={m.busy}
                       onChange={(e) => m.setReceived(e.target.value)}
                       placeholder="0"
                     />
@@ -329,6 +367,7 @@ export function PosScreen({
             aria-label={m.type === 'OWNER' ? 'Registrar retiro' : 'Confirmar cobro'}
             disabled={
               m.busy ||
+              m.scanning > 0 ||
               !m.shift ||
               !m.lines.length ||
               (!m.quoteValid && !m.offlineReady) ||

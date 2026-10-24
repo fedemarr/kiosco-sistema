@@ -238,14 +238,15 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
     ).toMatchObject({ userId: owner.id, code: 'QUOTE_CHANGED', resolved: false });
     expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(2);
   });
-  it('Excel sintético actualiza catálogo y genera Kardex, exporta stock bajo marcado', async () => {
+  it('Excel viejo conserva stock existente, carga solo el inicial nuevo y marca stock bajo', async () => {
     const p = await product(4);
     const category = await db.category.findUniqueOrThrow({ where: { id: categoryId } });
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Productos');
     sheet.addRows([
       ['código', 'nombre', 'costo', 'venta', 'stock', 'mínimo', 'categoría'],
-      [p.barcode, 'Producto Excel', 50, 130, 2, 3, category.name],
+      [p.barcode, 'Producto Excel', 50, 130, 2, 5, category.name],
+      [`EXCEL-${tag}`, 'Producto nuevo por Excel', 10, 20, 7, 2, category.name],
     ]);
     const bytes = await workbook.xlsx.writeBuffer();
     const array = Uint8Array.from(new Uint8Array(bytes)).buffer;
@@ -253,19 +254,148 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
     expect(await db.product.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({
       price: 13000,
       cost: 5000,
-      stock: 2,
-      minStock: 3,
+      stock: 4,
+      minStock: 5,
     });
+    const added = await db.product.findUniqueOrThrow({ where: { barcode: `EXCEL-${tag}` } });
+    products.push(added.id);
+    expect(added.stock).toBe(7);
+    await importWorkbook(owner.id, array);
+    expect((await db.product.findUniqueOrThrow({ where: { id: added.id } })).stock).toBe(7);
+    expect(await db.stockMovement.count({ where: { productId: added.id } })).toBe(1);
+    expect(await db.stockMovement.count({ where: { productId: p.id, type: 'COUNT' } })).toBe(0);
     const output = await exportWorkbook('products', new URL('http://localhost'));
     const exported = new ExcelJS.Workbook();
     await exported.xlsx.load(output);
     const match = exported.worksheets[0]
       .getRows(2, exported.worksheets[0].rowCount - 1)
       ?.find((r) => r.getCell(1).text === p.barcode);
-    expect(match?.getCell(5).value).toBe(2);
+    expect(match?.getCell(5).value).toBe(4);
     expect(match?.getCell(5).fill).toMatchObject({
       type: 'pattern',
       fgColor: { argb: 'FFFFE699' },
     });
+  });
+  it('reintentos simultáneos de carga tienen un solo movimiento y rechazan datos distintos', async () => {
+    const p = await product(0);
+    const requestKey = crypto.randomUUID();
+    const command = { type: 'RECEIPT', quantity: 7, requestKey, note: 'Remito único' };
+    const [a, b] = await Promise.all([
+      adjustStock(owner.id, p.id, command),
+      adjustStock(owner.id, p.id, command),
+    ]);
+    expect(a.id).toBe(b.id);
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(7);
+    expect(await db.stockMovement.count({ where: { productId: p.id } })).toBe(1);
+    await expect(adjustStock(owner.id, p.id, { ...command, quantity: 8 })).rejects.toMatchObject({
+      code: 'STOCK_REQUEST_CONFLICT',
+    });
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(7);
+  });
+  it('un conteo abierto antes de otra carga se rechaza y conserva el ingreso', async () => {
+    const p = await product(2);
+    await adjustStock(owner.id, p.id, { type: 'RECEIPT', quantity: 3 });
+    await expect(
+      adjustStock(owner.id, p.id, {
+        type: 'COUNT',
+        quantity: 1,
+        expectedStock: 2,
+        note: 'Conteo anterior',
+        requestKey: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: 'STOCK_CHANGED' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(5);
+    expect(await db.stockMovement.count({ where: { productId: p.id, type: 'COUNT' } })).toBe(0);
+  });
+  it('una carga y una venta simultáneas suman y descuentan sin pisarse', async () => {
+    const p = await product(10);
+    const sale = await payload(owner, p.id, 2);
+    await Promise.all([
+      adjustStock(owner.id, p.id, {
+        type: 'RECEIPT',
+        quantity: 5,
+        requestKey: crypto.randomUUID(),
+      }),
+      checkout(owner, sale),
+    ]);
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(13);
+    const ledger = await db.stockMovement.aggregate({
+      where: { productId: p.id },
+      _sum: { quantity: true },
+    });
+    expect(ledger._sum.quantity).toBe(13);
+  });
+  it('conteo y carga concurrentes conservan el ingreso o rechazan el conteo desactualizado', async () => {
+    const p = await product(10);
+    const [count, receipt] = await Promise.allSettled([
+      adjustStock(owner.id, p.id, {
+        type: 'COUNT',
+        quantity: 8,
+        expectedStock: 10,
+        note: 'Conteo físico',
+        requestKey: crypto.randomUUID(),
+      }),
+      adjustStock(owner.id, p.id, {
+        type: 'RECEIPT',
+        quantity: 5,
+        requestKey: crypto.randomUUID(),
+      }),
+    ]);
+    expect(receipt.status).toBe('fulfilled');
+    if (count.status === 'rejected') expect(count.reason).toMatchObject({ code: 'STOCK_CHANGED' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(
+      count.status === 'fulfilled' ? 13 : 15,
+    );
+  });
+  it('consumo empleado y retiro a costo descuentan cantidades y anulan una sola vez', async () => {
+    const p = await product(10);
+    const shift = await currentShift(owner.id);
+    const cart: CartInput = {
+      type: 'EMPLOYEE',
+      items: [{ kind: 'product', productId: p.id, quantity: 2 }],
+    };
+    const q = await quote(owner, cart);
+    const employee = await checkout(owner, {
+      ...cart,
+      shiftId: shift!.id,
+      idempotencyKey: crypto.randomUUID(),
+      quoteToken: q.quoteToken,
+      payments: [{ method: 'MP', amount: q.total }],
+    });
+    expect(employee).toMatchObject({ total: 16000, cost: 10000, adjustment: -4000 });
+    const withdrawal: CartInput = {
+      type: 'OWNER',
+      items: [{ kind: 'product', productId: p.id, quantity: 3 }],
+      note: 'Retiro de prueba',
+    };
+    const wq = await quote(owner, withdrawal);
+    const taken = await checkout(owner, {
+      ...withdrawal,
+      shiftId: shift!.id,
+      idempotencyKey: crypto.randomUUID(),
+      quoteToken: wq.quoteToken,
+      payments: [],
+    });
+    expect(taken).toMatchObject({ total: 15000, cost: 15000 });
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(5);
+    await Promise.all([
+      voidOperation(owner, employee.id, 'Anular prueba'),
+      voidOperation(owner, taken.id, 'Anular prueba'),
+    ]);
+    await voidOperation(owner, taken.id, 'Repetir anulación');
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(10);
+  });
+  it('un producto repetido no permite vender más unidades que el stock disponible', async () => {
+    const p = await product(3);
+    await expect(
+      quote(owner, {
+        type: 'SALE',
+        items: [
+          { kind: 'product', productId: p.id, quantity: 2 },
+          { kind: 'product', productId: p.id, quantity: 2 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(3);
   });
 });

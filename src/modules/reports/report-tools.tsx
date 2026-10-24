@@ -1,11 +1,13 @@
 'use client';
 import { useRef, useState } from 'react';
 import { TriangleAlert, Plus } from 'lucide-react';
-import { request, errorMessage } from '@/lib/client';
+import { errorMessage } from '@/lib/client';
 import { useRemote } from '@/hooks/use-remote';
 import { dateTime, money } from '@/lib/format';
 import { OfflineReview } from '@/modules/offline/review';
 import type { Report } from './report-screen';
+import { performStockCommand } from '@/modules/stock/commands';
+import { useUser } from '@/components/app-shell';
 type LowProduct = Report['lowStock'][number];
 export function ReportStock({
   products,
@@ -17,10 +19,12 @@ export function ReportStock({
   refresh: () => Promise<void>;
 }) {
   const [product, setProduct] = useState<LowProduct | null>(null);
+  const user = useUser();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const dialog = useRef<HTMLDialogElement>(null);
+  const requestKey = useRef('');
   return (
     <>
       <section className="low-stock-panel">
@@ -45,6 +49,7 @@ export function ReportStock({
               <button
                 onClick={() => {
                   setProduct(p);
+                  requestKey.current = crypto.randomUUID();
                   setError('');
                   dialog.current?.showModal();
                 }}
@@ -79,8 +84,11 @@ export function ReportStock({
               setBusy(true);
               setError('');
               try {
-                await request(`products/${product.id}/movements`, 'POST', {
+                await performStockCommand(user.id, {
+                  productId: product.id,
+                  productName: product.name,
                   type: 'RECEIPT',
+                  requestKey: requestKey.current,
                   quantity: Number(data.get('quantity')),
                   note: String(data.get('note') || 'Reposición desde panel del dueño'),
                 });

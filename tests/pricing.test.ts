@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { calculateTotals, validatePayments } from '@/modules/sales/pricing';
 import { businessDate, money, normalizeUsername } from '@/lib/format';
 describe('precios en centavos y horario argentino', () => {
+  it('cantidades, centavos y recargos redondean el total sin errores de coma flotante', () => {
+    const subtotal = 3333 * 3 + 5 * 2;
+    expect(calculateTotals(subtotal, 6500, 'SALE', new Date('2026-10-24T02:00:00Z'))).toMatchObject(
+      { subtotal: 10009, adjustment: 1001, total: 11010 },
+    );
+    expect(
+      calculateTotals(subtotal, 6500, 'EMPLOYEE', new Date('2026-10-24T02:00:00Z')).total,
+    ).toBe(8007);
+  });
   it.each([
     ['2026-10-24T00:59:00Z', 10000],
     ['2026-10-24T01:00:00Z', 11000],

@@ -159,18 +159,20 @@ export async function importWorkbook(userId: string, buffer: ArrayBuffer) {
         minStock: row.minStock,
         categoryId: category.id,
         deletedAt: null,
+        sellable: true,
+        reviewNote: null,
       };
       const old = await tx.product.findUnique({ where: { barcode: row.barcode } });
       const p = old
         ? await tx.product.update({ where: { id: old.id }, data })
         : await tx.product.create({ data: { ...data, barcode: row.barcode } });
-      if (p.trackStock && row.stock !== p.stock)
+      if (!old && p.trackStock && row.stock !== p.stock)
         await moveStock(tx, {
           productId: p.id,
           userId,
           type: 'COUNT',
           delta: row.stock - p.stock,
-          note: 'Conteo por importación Excel del dueño',
+          note: 'Stock inicial de producto nuevo por Excel del dueño',
         });
     }
     await audit(tx, userId, 'EXCEL_IMPORTED', { count: rows.length });

@@ -218,3 +218,127 @@ test('caja, turno, venta offline idempotente y diseño sin desborde', async ({ p
     fullPage: true,
   });
 });
+
+test('respuestas perdidas y recargas no duplican una venta ni una carga de mercadería', async ({
+  page,
+  baseURL,
+}) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  const startStock = (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock;
+  const startSales = await db.operation.count({
+    where: { userId: ownerId, items: { some: { productId } } },
+  });
+  expect(
+    (
+      await page.request.post('/api/shifts/open', {
+        headers: { Origin: baseURL! },
+        data: { type: 'AFTERNOON', openingCash: 0 },
+      })
+    ).status(),
+  ).toBe(200);
+  await page.goto('/caja');
+  await page.route(`**/api/catalog?q=${encodeURIComponent(barcode)}`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.continue();
+  });
+  await page.getByLabel('Buscar producto').fill(barcode);
+  await page.getByLabel('Buscar producto').press('Enter');
+  await page.getByLabel('Buscar producto').fill(barcode);
+  await page.getByLabel('Buscar producto').press('Enter');
+  await expect(page.locator('.pos-cart-row .quantity span')).toHaveText('2');
+  await page.getByRole('radio', { name: 'Mercado Pago', exact: true }).click();
+  let saleDelivered!: () => void;
+  const lostSale = new Promise<void>((resolve) => {
+    saleDelivered = resolve;
+  });
+  await page.route(
+    '**/api/sales',
+    async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      await route.abort('failed');
+      saleDelivered();
+    },
+    { times: 1 },
+  );
+  await page.getByRole('button', { name: 'Confirmar cobro' }).click();
+  await lostSale;
+  await expect
+    .poll(() => db.operation.count({ where: { userId: ownerId, items: { some: { productId } } } }))
+    .toBe(startSales + 1);
+  await page.reload();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          new Promise<number>((resolve, reject) => {
+            const open = indexedDB.open('kiosco-pos-v1', 2);
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+              const db = open.result;
+              const tx = db.transaction('sales', 'readonly');
+              const count = tx.objectStore('sales').count();
+              count.onsuccess = () => resolve(count.result);
+              count.onerror = () => reject(count.error);
+              tx.oncomplete = () => db.close();
+            };
+          }),
+      ),
+    )
+    .toBe(0);
+  await expect(page.getByText('Ver cobros pendientes', { exact: true })).toHaveCount(0);
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+    startStock - 2,
+  );
+  expect(
+    await db.operation.count({ where: { userId: ownerId, items: { some: { productId } } } }),
+  ).toBe(startSales + 1);
+  await page.goto('/stock');
+  await page.getByLabel('Buscar en stock').fill(barcode);
+  const row = page.locator('article.card').filter({ hasText: barcode });
+  await row.getByRole('button', { name: '+ Cargar', exact: true }).click();
+  await page.getByLabel('Cantidad a sumar').fill('4');
+  let stockDelivered!: () => void;
+  const lostStock = new Promise<void>((resolve) => {
+    stockDelivered = resolve;
+  });
+  await page.route(
+    `**/api/products/${productId}/movements`,
+    async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      await route.abort('failed');
+      stockDelivered();
+    },
+    { times: 1 },
+  );
+  await page.getByRole('button', { name: 'Registrar movimiento', exact: true }).click();
+  await lostStock;
+  await expect
+    .poll(async () => (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock)
+    .toBe(startStock + 2);
+  await page.reload();
+  await expect(
+    page.getByText('Carga de stock pendiente de confirmación', { exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar estado de la carga', exact: true }).click();
+  await expect(
+    page.getByText('Movimiento de stock confirmado. Se registró una sola vez.', { exact: true }),
+  ).toBeVisible();
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+    startStock + 2,
+  );
+  expect(
+    (
+      await page.request.post('/api/shifts/close', {
+        headers: { Origin: baseURL! },
+        data: { countedCash: 0 },
+      })
+    ).status(),
+  ).toBe(200);
+});

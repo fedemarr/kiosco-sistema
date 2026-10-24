@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
 import { AppError } from '@/lib/errors';
 import { transaction } from '@/lib/transaction';
 import { audit } from '@/lib/audit';
-import type { Prisma, MovementType } from '@/generated/prisma/client';
+import { Prisma, type MovementType } from '@/generated/prisma/client';
 export const cents = z.number().int().min(0).max(100_000_000);
 export const productSchema = z
   .object({
@@ -21,6 +22,8 @@ export const movementSchema = z
     type: z.enum(['RECEIPT', 'COUNT']),
     quantity: z.number().int().min(0).max(1000000),
     note: z.string().trim().max(500).optional(),
+    requestKey: z.uuid().optional(),
+    expectedStock: z.number().int().min(0).max(2147483647).optional(),
   })
   .strict();
 export async function moveStock(
@@ -32,6 +35,8 @@ export async function moveStock(
     delta: number;
     reference?: string;
     note?: string;
+    requestKey?: string;
+    requestHash?: string;
   },
 ) {
   const rows = await tx.$queryRaw<
@@ -129,25 +134,73 @@ export async function saveProduct(userId: string, body: unknown, id?: string) {
 }
 export async function adjustStock(userId: string, productId: string, body: unknown) {
   const input = movementSchema.parse(body);
-  return transaction(async (tx) => {
-    const product = await tx.product.findUnique({ where: { id: productId } });
-    if (!product || product.deletedAt) throw new AppError('Producto no encontrado.', 404);
-    if (!product.trackStock) throw new AppError('Este producto no controla stock.');
-    const delta = input.type === 'RECEIPT' ? input.quantity : input.quantity - product.stock;
-    if (input.type === 'RECEIPT' && delta <= 0)
-      throw new AppError('La cantidad a cargar debe ser mayor a cero.');
-    if (delta < 0 && !input.note)
-      throw new AppError('Para bajar el stock necesitás indicar un motivo.');
-    const movement = await moveStock(tx, {
-      productId,
-      userId,
-      type: input.type,
-      delta,
-      note: input.note,
+  const requestKey = input.requestKey || crypto.randomUUID();
+  const requestHash = createHash('sha256')
+    .update(
+      JSON.stringify({
+        productId,
+        userId,
+        type: input.type,
+        quantity: input.quantity,
+        note: input.note || null,
+        expectedStock: input.expectedStock ?? null,
+      }),
+    )
+    .digest('hex');
+  const replay = async (tx: Prisma.TransactionClient) => {
+    const old = await tx.stockMovement.findUnique({ where: { requestKey } });
+    if (!old) return null;
+    if (old.userId !== userId || old.productId !== productId || old.requestHash !== requestHash)
+      throw new AppError(
+        'Esta solicitud ya se usó con otros datos. Revisá el historial antes de cargar otra vez.',
+        409,
+        'STOCK_REQUEST_CONFLICT',
+      );
+    return old;
+  };
+  const previous = await replay(db);
+  if (previous) return previous;
+  try {
+    return await transaction(async (tx) => {
+      const existing = await replay(tx);
+      if (existing) return existing;
+      const product = await tx.product.findUnique({ where: { id: productId } });
+      if (!product || product.deletedAt) throw new AppError('Producto no encontrado.', 404);
+      if (!product.trackStock) throw new AppError('Este producto no controla stock.');
+      if (
+        input.type === 'COUNT' &&
+        input.expectedStock !== undefined &&
+        product.stock !== input.expectedStock
+      )
+        throw new AppError(
+          'El stock cambió desde que abriste el conteo. Cerrá, actualizá y revisá la cantidad antes de corregir.',
+          409,
+          'STOCK_CHANGED',
+        );
+      const delta = input.type === 'RECEIPT' ? input.quantity : input.quantity - product.stock;
+      if (input.type === 'RECEIPT' && delta <= 0)
+        throw new AppError('La cantidad a cargar debe ser mayor a cero.');
+      if (delta < 0 && !input.note)
+        throw new AppError('Para bajar el stock necesitás indicar un motivo.');
+      const movement = await moveStock(tx, {
+        productId,
+        userId,
+        type: input.type,
+        delta,
+        note: input.note,
+        requestKey,
+        requestHash,
+      });
+      await audit(tx, userId, 'STOCK_ADJUSTED', { productId, ...input, delta });
+      return movement;
     });
-    await audit(tx, userId, 'STOCK_ADJUSTED', { productId, ...input, delta });
-    return movement;
-  });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const previous = await replay(db);
+      if (previous) return previous;
+    }
+    throw error;
+  }
 }
 export async function mergeProducts(userId: string, targetId: string, sourceId: string) {
   if (targetId === sourceId) throw new AppError('Elegí dos productos diferentes.');

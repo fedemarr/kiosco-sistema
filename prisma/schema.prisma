@@ -186,6 +186,8 @@ model StockMovement {
   after Int
   reference String?
   note String?
+  requestKey String? @unique @map("request_key") @db.Uuid
+  requestHash String? @map("request_hash")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   @@index([userId])
   @@index([productId, createdAt])

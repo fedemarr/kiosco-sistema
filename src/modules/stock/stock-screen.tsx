@@ -17,6 +17,7 @@ import type { Product, ProductList, Category } from '@/lib/types';
 import { money, dateTime, toCents } from '@/lib/format';
 import { useUser } from '@/components/app-shell';
 import { can } from '@/modules/auth/permissions';
+import { performStockCommand } from './commands';
 type Movement = {
   id: string;
   type: string;
@@ -29,7 +30,7 @@ type Movement = {
 };
 type Modal =
   | { kind: 'edit'; product?: Product }
-  | { kind: 'move'; product: Product; type: 'RECEIPT' | 'COUNT' }
+  | { kind: 'move'; product: Product; type: 'RECEIPT' | 'COUNT'; requestKey: string }
   | { kind: 'history'; product: Product }
   | { kind: 'merge' };
 export function StockScreen() {
@@ -155,7 +156,9 @@ export function StockScreen() {
                     const res = await fetch('/api/imports', { method: 'POST', body: form });
                     const result = await res.json();
                     if (!res.ok) throw new Error(result.error.message);
-                    setMessage(`Excel importado: ${result.data.count} productos procesados.`);
+                    setMessage(
+                      `Excel importado: ${result.data.count} productos procesados. El stock existente se conservó; solo se cargó el inicial de productos nuevos.`,
+                    );
                     await list.refresh();
                   } catch (err) {
                     setError(errorMessage(err));
@@ -223,13 +226,27 @@ export function StockScreen() {
               <div className="row">
                 <button
                   disabled={!p.trackStock || busy}
-                  onClick={() => open({ kind: 'move', product: p, type: 'RECEIPT' })}
+                  onClick={() =>
+                    open({
+                      kind: 'move',
+                      product: p,
+                      type: 'RECEIPT',
+                      requestKey: crypto.randomUUID(),
+                    })
+                  }
                 >
                   + Cargar
                 </button>
                 <button
                   disabled={!p.trackStock || busy}
-                  onClick={() => open({ kind: 'move', product: p, type: 'COUNT' })}
+                  onClick={() =>
+                    open({
+                      kind: 'move',
+                      product: p,
+                      type: 'COUNT',
+                      requestKey: crypto.randomUUID(),
+                    })
+                  }
                 >
                   Corregir
                 </button>
@@ -275,7 +292,13 @@ export function StockScreen() {
           </button>
         </div>
       )}
-      <dialog ref={dialog} onCancel={() => setModal(null)}>
+      <dialog
+        ref={dialog}
+        onCancel={(e) => {
+          if (busy) e.preventDefault();
+          else setModal(null);
+        }}
+      >
         <div className="row between toolbar">
           <h2 style={{ margin: 0 }}>
             {modal?.kind === 'edit'
@@ -290,7 +313,9 @@ export function StockScreen() {
                   ? 'Historial de stock'
                   : 'Fusionar duplicados'}
           </h2>
-          <button onClick={close}>Cerrar</button>
+          <button disabled={busy} onClick={close}>
+            Cerrar
+          </button>
         </div>
         {error && (
           <p className="error" role="alert">
@@ -399,10 +424,14 @@ export function StockScreen() {
               const d = new FormData(e.currentTarget);
               void action(
                 () =>
-                  request(`products/${modal.product.id}/movements`, 'POST', {
+                  performStockCommand(user.id, {
+                    productId: modal.product.id,
+                    productName: modal.product.name,
                     type: modal.type,
+                    requestKey: modal.requestKey,
+                    ...(modal.type === 'COUNT' ? { expectedStock: modal.product.stock } : {}),
                     quantity: Number(d.get('quantity')),
-                    note: d.get('note') || undefined,
+                    note: String(d.get('note') || '') || undefined,
                   }),
                 'Movimiento registrado en el Kardex.',
               );

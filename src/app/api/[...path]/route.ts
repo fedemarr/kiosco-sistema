@@ -225,8 +225,21 @@ async function dispatch(request: Request, context: Context) {
           take: 50,
           skip: (page - 1) * 50,
         });
-      if (path[2] === 'movements' && method === 'POST')
-        return adjustStock(user.id, id, await req.json());
+      if (path[2] === 'movements' && method === 'POST') {
+        const input = z
+          .object({
+            requestKey: z.uuid(),
+            type: z.enum(['RECEIPT', 'COUNT']),
+            expectedStock: z.number().int().nonnegative().optional(),
+          })
+          .passthrough()
+          .refine(
+            (v) => v.type !== 'COUNT' || v.expectedStock !== undefined,
+            'Actualizá el stock antes de iniciar un conteo.',
+          )
+          .parse(await req.json());
+        return adjustStock(user.id, id, input);
+      }
     }
     if (path[0] === 'users') {
       requirePermission(user, 'owner');

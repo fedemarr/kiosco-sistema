@@ -16,6 +16,7 @@ import type { Actor } from '@/modules/auth/permissions';
 import { can } from '@/modules/auth/permissions';
 import { request, errorMessage } from '@/lib/client';
 import { OfflineStatus } from './offline-status';
+import { StockRecovery } from './stock-recovery';
 import { clearOfflineSession } from '@/modules/offline/catalog';
 const UserContext = createContext<Actor | null>(null);
 export function useUser() {
@@ -104,6 +105,7 @@ export function AppShell({ user, children }: { user: Actor; children: React.Reac
             </Link>
           </div>
           <OfflineStatus user={user} />
+          <StockRecovery userId={user.id} />
           {error && (
             <p className="error" role="alert">
               {error}

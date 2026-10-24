@@ -35,11 +35,13 @@ export function useRemote<T>(path: string | null) {
       if (!document.hidden) void refresh();
     };
     window.addEventListener('online', focus);
+    window.addEventListener('stock-change', focus);
     document.addEventListener('visibilitychange', focus);
     return () => {
       clearTimeout(timer);
       clearInterval(interval);
       window.removeEventListener('online', focus);
+      window.removeEventListener('stock-change', focus);
       document.removeEventListener('visibilitychange', focus);
     };
   }, [refresh]);

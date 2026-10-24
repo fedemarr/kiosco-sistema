@@ -28,6 +28,10 @@ export async function enqueue(userId: string, payload: CheckoutInput) {
   } satisfies Pending);
   window.dispatchEvent(new Event('queue-change'));
 }
+export async function removePendingSale(key: string) {
+  await (await database()).delete('sales', key);
+  window.dispatchEvent(new Event('queue-change'));
+}
 export async function pendingSales(userId: string, owner = false): Promise<Pending[]> {
   return ((await (await database()).getAll('sales')) as Pending[]).filter(
     (p) => owner || p.userId === userId,
@@ -60,8 +64,11 @@ async function processSales(userId: string) {
   }
   for (const sale of sales.filter((s) => s.status === 'PENDING')) {
     try {
-      await request('sales/sync', 'POST', sale.payload);
+      const result = await request<{ id: string }>('sales/sync', 'POST', sale.payload);
       await db.delete('sales', sale.key);
+      window.dispatchEvent(
+        new CustomEvent('sale-confirmed', { detail: { key: sale.key, id: result.id } }),
+      );
     } catch (error) {
       if (
         !(error instanceof ApiError) ||
