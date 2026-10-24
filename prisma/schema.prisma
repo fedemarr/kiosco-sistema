@@ -1,0 +1,251 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+}
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  SELLER
+}
+enum ShiftType {
+  MORNING
+  AFTERNOON
+  NIGHT
+}
+enum OperationType {
+  SALE
+  EMPLOYEE
+  OWNER
+}
+enum PaymentMethod {
+  CASH
+  CARD
+  MP
+}
+enum MovementType {
+  SALE
+  EMPLOYEE
+  OWNER
+  VOID
+  RECEIPT
+  COUNT
+  MERGE
+}
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  username String
+  passwordHash String @map("password_hash")
+  role Role @default(SELLER)
+  stockEnabled Boolean @default(false) @map("stock_enabled")
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions Session[]
+  shifts Shift[]
+  operations Operation[]
+  movements StockMovement[]
+  requests StockRequest[]
+  audit AuditLog[]
+  offlineConflicts OfflineConflict[]
+  @@index([username])
+  @@map("users")
+}
+model Session {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([userId])
+  @@map("sessions")
+}
+model Category {
+  id String @id @default(uuid()) @db.Uuid
+  name String @unique
+  products Product[]
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@map("categories")
+}
+model Product {
+  id String @id @default(uuid()) @db.Uuid
+  barcode String @unique
+  name String
+  categoryId String @map("category_id") @db.Uuid
+  category Category @relation(fields: [categoryId], references: [id])
+  cost Int @default(0)
+  price Int
+  stock Int @default(0)
+  minStock Int @default(0) @map("min_stock")
+  trackStock Boolean @default(true) @map("track_stock")
+  mergedIntoId String? @map("merged_into_id") @db.Uuid
+  mergedInto Product? @relation("ProductMerges", fields: [mergedIntoId], references: [id])
+  mergedSources Product[] @relation("ProductMerges")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  movements StockMovement[]
+  items OperationItem[]
+  @@index([categoryId])
+  @@index([mergedIntoId])
+  @@index([name])
+  @@map("products")
+}
+model Shift {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  type ShiftType
+  businessDate String @map("business_date") @db.VarChar(10)
+  openedAt DateTime @default(now()) @map("opened_at") @db.Timestamptz(3)
+  closedAt DateTime? @map("closed_at") @db.Timestamptz(3)
+  openingCash Int @map("opening_cash")
+  countedCash Int? @map("counted_cash")
+  expectedCash Int? @map("expected_cash")
+  difference Int?
+  operations Operation[]
+  @@index([userId])
+  @@index([businessDate])
+  @@map("shifts")
+}
+model Operation {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  shiftId String @map("shift_id") @db.Uuid
+  shift Shift @relation(fields: [shiftId], references: [id])
+  type OperationType
+  subtotal Int
+  adjustment Int
+  total Int
+  cost Int
+  note String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  voidedAt DateTime? @map("voided_at") @db.Timestamptz(3)
+  voidReason String? @map("void_reason")
+  items OperationItem[]
+  payments Payment[]
+  idempotency Idempotency?
+  @@index([userId])
+  @@index([shiftId])
+  @@index([createdAt])
+  @@map("operations")
+}
+model OperationItem {
+  id String @id @default(uuid()) @db.Uuid
+  operationId String @map("operation_id") @db.Uuid
+  operation Operation @relation(fields: [operationId], references: [id])
+  productId String? @map("product_id") @db.Uuid
+  product Product? @relation(fields: [productId], references: [id])
+  name String
+  quantity Int
+  unitPrice Int @map("unit_price")
+  unitCost Int @map("unit_cost")
+  subtotal Int
+  stockTracked Boolean @map("stock_tracked")
+  @@index([operationId])
+  @@index([productId])
+  @@map("operation_items")
+}
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+  operationId String @map("operation_id") @db.Uuid
+  operation Operation @relation(fields: [operationId], references: [id])
+  method PaymentMethod
+  amount Int
+  @@index([operationId])
+  @@map("payments")
+}
+model StockMovement {
+  id String @id @default(uuid()) @db.Uuid
+  productId String @map("product_id") @db.Uuid
+  product Product @relation(fields: [productId], references: [id])
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  type MovementType
+  quantity Int
+  before Int
+  after Int
+  reference String?
+  note String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([userId])
+  @@index([productId, createdAt])
+  @@map("stock_movements")
+}
+model QuickButton {
+  id String @id @default(uuid()) @db.Uuid
+  name String @unique
+  emoji String @default("⚡")
+  price Int
+  sortOrder Int @default(0) @map("sort_order")
+  active Boolean @default(true)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@map("quick_buttons")
+}
+model StockRequest {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  status RequestStatus @default(PENDING)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@index([userId])
+  @@map("stock_requests")
+}
+model Idempotency {
+  key String @id @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  requestHash String @map("request_hash")
+  operationId String @unique @map("operation_id") @db.Uuid
+  operation Operation @relation(fields: [operationId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([userId])
+  @@map("idempotency")
+}
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  action String
+  detail Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+model RateLimit {
+  key String @id
+  count Int
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  @@index([expiresAt])
+  @@map("rate_limits")
+}
+model OfflineConflict {
+  key String @id @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  payload Json
+  code String
+  message String
+  resolved Boolean @default(false)
+  resolution String?
+  resolvedBy String? @map("resolved_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@index([userId])
+  @@index([resolved, createdAt])
+  @@map("offline_conflicts")
+}

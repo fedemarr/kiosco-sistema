@@ -1,0 +1,59 @@
+export type Product = {
+  id: string;
+  barcode: string;
+  name: string;
+  categoryId: string;
+  category: { name: string };
+  cost: number;
+  price: number;
+  stock: number;
+  minStock: number;
+  trackStock: boolean;
+};
+export type Category = { id: string; name: string };
+export type Quick = {
+  id: string;
+  name: string;
+  emoji: string;
+  price: number;
+  sortOrder: number;
+  active?: boolean;
+};
+export type Payment = { method: 'CASH' | 'CARD' | 'MP'; amount: number };
+export type Operation = {
+  id: string;
+  type: 'SALE' | 'EMPLOYEE' | 'OWNER';
+  total: number;
+  cost: number;
+  adjustment: number;
+  createdAt: string;
+  payments: Payment[];
+  items: { name: string; quantity: number; subtotal: number }[];
+};
+export type Shift = {
+  offlineToken?: string;
+  totals?: { CASH: number; MP: number; CARD: number };
+  id: string;
+  type: 'MORNING' | 'AFTERNOON' | 'NIGHT';
+  openedAt: string;
+  closedAt: string | null;
+  businessDate: string;
+  openingCash: number;
+  countedCash: number | null;
+  expectedCash: number | null;
+  difference: number | null;
+  operations: Operation[];
+  user?: { id: string; name: string };
+};
+export type Quotation = {
+  subtotal: number;
+  total: number;
+  cost: number;
+  adjustment: number;
+  night: boolean;
+  quoteToken: string;
+  quotedAt: string;
+};
+export type ProductList = { products: Product[]; total: number; page: number };
+export const shiftNames = { MORNING: 'Mañana', AFTERNOON: 'Tarde', NIGHT: 'Noche' };
+export const paymentNames = { CASH: 'Efectivo', MP: 'Mercado Pago', CARD: 'Tarjeta' };

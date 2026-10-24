@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+coverage/
+playwright-report/
+test-results/
+src/generated/
+*.tsbuildinfo
+.local-postgres/
+.screenshots/
+data/
+productos.*
+usuarios.json
+turnos_ultimos_100.json
