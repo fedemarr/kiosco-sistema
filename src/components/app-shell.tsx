@@ -44,7 +44,17 @@ export function AppShell({ user, children }: { user: Actor; children: React.Reac
       <div className="shell">
         <aside className="sidebar">
           <Link className="brand" href="/caja">
-            <span className="brand-mark">k</span>Kiosco<span className="badge">POS</span>
+            <span className="brand-mark">K</span>Kiosco POS
+          </Link>
+          <Link href="/cuenta" className="sidebar-account">
+            <span>{user.name}</span>
+            <span className="role-badge">
+              {user.role === 'OWNER'
+                ? 'dueño'
+                : user.role === 'ADMIN'
+                  ? 'administrador'
+                  : 'vendedor'}
+            </span>
           </Link>
           <nav aria-label="Navegación principal">
             {links.map((l) => (
@@ -82,10 +92,12 @@ export function AppShell({ user, children }: { user: Actor; children: React.Reac
             </button>
           </footer>
         </aside>
-        <main className="main">
+        <main
+          className={`main ${path === '/caja' || path === '/offline' ? 'main-pos' : ''} ${path === '/reportes' ? 'main-reports' : ''}`}
+        >
           <div className="mobile-user row between">
             <Link href="/caja" className="brand">
-              <span className="brand-mark">k</span>Kiosco
+              <span className="brand-mark">K</span>Kiosco
             </Link>
             <Link href="/cuenta" className="pill">
               {user.name}

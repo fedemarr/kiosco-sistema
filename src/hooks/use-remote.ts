@@ -1,23 +1,31 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { request, errorMessage } from '@/lib/client';
 export function useRemote<T>(path: string | null) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<{
+    path: string | null;
+    data: T | null;
+    error: string;
+    loading: boolean;
+  }>({ path: null, data: null, error: '', loading: true });
+  const version = useRef(0);
   const refresh = useCallback(async () => {
+    const current = ++version.current;
     if (!path) {
-      setLoading(false);
+      setState({ path, data: null, error: '', loading: false });
       return;
     }
     try {
       const value = await request<T>(path);
-      setData(value);
-      setError('');
+      if (current === version.current) setState({ path, data: value, error: '', loading: false });
     } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
+      if (current === version.current)
+        setState((old) => ({
+          path,
+          data: old.path === path ? old.data : null,
+          error: errorMessage(e),
+          loading: false,
+        }));
     }
   }, [path]);
   useEffect(() => {
@@ -35,5 +43,10 @@ export function useRemote<T>(path: string | null) {
       document.removeEventListener('visibilitychange', focus);
     };
   }, [refresh]);
-  return { data, error, loading, refresh };
+  return {
+    data: state.path === path ? state.data : null,
+    error: state.path === path ? state.error : '',
+    loading: path !== state.path ? !!path : state.loading,
+    refresh,
+  };
 }

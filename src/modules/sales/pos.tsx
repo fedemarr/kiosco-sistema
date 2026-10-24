@@ -1,22 +1,11 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Search,
-  Plus,
-  Minus,
-  Trash2,
-  ShoppingBasket,
-  ArrowRight,
-  Moon,
-  ScanBarcode,
-} from 'lucide-react';
-import Link from 'next/link';
+import { PosScreen } from './pos-screen';
 import { request, errorMessage, ApiError } from '@/lib/client';
 import { money, isNight, toCents, nextTariffDelay } from '@/lib/format';
 import type { Product, ProductList, Quick, Category, Quotation, Shift, Payment } from '@/lib/types';
 import type { CartInput, CheckoutInput } from './schema';
 import { useUser } from '@/components/app-shell';
-import { can } from '@/modules/auth/permissions';
 import { enqueue } from '@/modules/offline/queue';
 import { cacheCatalog, readSnapshot, saveSnapshot, warmCatalog } from '@/modules/offline/catalog';
 type Line = {
@@ -28,7 +17,7 @@ type Line = {
   productId?: string;
   quickId?: string;
 };
-export function Pos() {
+function usePos() {
   const user = useUser();
   const [products, setProducts] = useState<Product[]>([]);
   const [totalProducts, setTotalProducts] = useState(0);
@@ -56,6 +45,9 @@ export function Pos() {
   const [refreshKey, setRefreshKey] = useState(0);
   const warmed = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const bindSearch = useCallback((node: HTMLInputElement | null) => {
+    searchRef.current = node;
+  }, []);
   const cart: CartInput = {
     type,
     items: lines.map((l) =>
@@ -117,7 +109,10 @@ export function Pos() {
       setOnline(false);
       void load();
     };
-    const changed = () => setRefreshKey((key) => key + 1);
+    const changed = () => {
+      setRefreshKey((key) => key + 1);
+      void load();
+    };
     const interval = setInterval(changed, 15000);
     window.addEventListener('offline', offline);
     window.addEventListener('queue-change', changed);
@@ -236,7 +231,8 @@ export function Pos() {
     : type === 'EMPLOYEE'
       ? displaySubtotal - Math.round(displaySubtotal * 0.2)
       : displaySubtotal + (type === 'SALE' && night ? Math.round(displaySubtotal * 0.1) : 0);
-  const cashAmount = method === 'MIXED' ? toCents(cash) : method === 'CASH' ? total : 0;
+  const cashAmount =
+    type === 'OWNER' ? 0 : method === 'MIXED' ? toCents(cash) : method === 'CASH' ? total : 0;
   const change = toCents(received || '0') - cashAmount;
   async function charge() {
     if ((!quoteValid && !offlineReady) || !shift) return;
@@ -316,354 +312,85 @@ export function Pos() {
       setBusy(false);
     }
   }
-  return (
-    <>
-      <header className="page-head row between">
-        <div>
-          <p className="overline">Punto de venta</p>
-          <h1>Listos para un buen día.</h1>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Buscá, agregá y cobrá. Así de simple.
-          </p>
-        </div>
-        <div className="stack">
-          <span className="pill">● {shift ? 'Turno abierto' : 'Sin turno abierto'}</span>
-          {night && (
-            <span className="pill">
-              <Moon size={14} />
-              Tarifa nocturna +10%
-            </span>
-          )}
-        </div>
-      </header>
-      {!shift && (
-        <p className="note">
-          Para cobrar necesitás abrir tu turno.{' '}
-          <Link href="/turnos">
-            <strong>Abrir turno →</strong>
-          </Link>
-        </p>
-      )}
-      {message && (
-        <p className="success" role="status">
-          {message}
-        </p>
-      )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="grid workspace">
-        <section className="stack">
-          <div className="search">
-            <Search size={21} />
-            <input
-              ref={searchRef}
-              aria-label="Buscar producto"
-              placeholder="Buscá un producto o escaneá el código"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  const p = products.find((p) => p.barcode.toLowerCase() === search.toLowerCase());
-                  if (p) {
-                    add({
-                      kind: 'product',
-                      key: p.id,
-                      productId: p.id,
-                      name: p.name,
-                      price: p.price,
-                    });
-                    setSearch('');
-                  } else setError('No encontramos ese código. Esperá la búsqueda o revisalo.');
-                }
-              }}
-            />
-          </div>
-          <div className="row between">
-            <small className="row">
-              <ScanBarcode size={15} />
-              Lector de código compatible
-            </small>
-            <small>{totalProducts} productos</small>
-          </div>
-          <div className="row">
-            <select
-              aria-label="Filtrar por categoría"
-              value={category}
-              onChange={(e) => {
-                setCategory(e.target.value);
-                setPage(1);
-              }}
-              style={{ width: 'auto', maxWidth: '100%' }}
-            >
-              <option value="">Todas las categorías</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => setCustom(!custom)}>+ Venta rápida</button>
-          </div>
-          {custom && (
-            <form
-              className="card stack"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const d = new FormData(e.currentTarget);
-                const name = String(d.get('name'));
-                const price = toCents(String(d.get('price')));
-                if (!Number.isInteger(price) || price <= 0) {
-                  setError('Ingresá un precio válido.');
-                  return;
-                }
-                add({ kind: 'custom', key: crypto.randomUUID(), name, price });
-                setCustom(false);
-              }}
-            >
-              <h2>Venta rápida</h2>
-              <label>
-                Descripción
-                <input name="name" minLength={2} maxLength={100} required />
-              </label>
-              <label>
-                Precio ($)
-                <input name="price" type="number" min="0.01" step="0.01" required />
-              </label>
-              <button className="primary">Agregar al carrito</button>
-            </form>
-          )}
-          <div>
-            <p className="overline">A un toque</p>
-            <div className="row">
-              {quick.map((q) => (
-                <button
-                  key={q.id}
-                  onClick={() =>
-                    add({ kind: 'quick', key: q.id, quickId: q.id, name: q.name, price: q.price })
-                  }
-                >
-                  {q.emoji} {q.name} <small>{money(q.price)}</small>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="row between">
-            <h2 style={{ margin: 0 }}>Tu catálogo</h2>
-            <span className="badge">{loading ? 'BUSCANDO…' : 'PRODUCTOS'}</span>
-          </div>
-          {!loading && !products.length && (
-            <div className="card empty">
-              <PackageEmpty />
-              <p>Todavía no hay productos para mostrar.</p>
-              <small>
-                {search
-                  ? 'Probá con otro nombre o código.'
-                  : 'Cargá productos desde Stock. La importación se hará después.'}
-              </small>
-            </div>
-          )}
-          <div className="product-grid">
-            {products.map((p) => (
-              <button
-                className="product-tile"
-                key={p.id}
-                disabled={p.trackStock && p.stock <= 0}
-                onClick={() =>
-                  add({ kind: 'product', key: p.id, productId: p.id, name: p.name, price: p.price })
-                }
-              >
-                <small>{p.category.name}</small>
-                <strong>{p.name}</strong>
-                <span className="price">{money(p.price)}</span>
-                <small>{p.trackStock ? `${p.stock} disponibles` : 'Sin límite de stock'}</small>
-              </button>
-            ))}
-          </div>
-          {totalProducts > 60 && (
-            <div className="row">
-              <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
-                Anterior
-              </button>
-              <small>Página {page}</small>
-              <button disabled={page * 60 >= totalProducts} onClick={() => setPage(page + 1)}>
-                Siguiente
-              </button>
-            </div>
-          )}
-        </section>
-        <aside className="card cart stack">
-          <div className="row between">
-            <h2 style={{ margin: 0 }}>Venta actual</h2>
-            <span className="pill">{lines.reduce((s, l) => s + l.quantity, 0)} ítems</span>
-          </div>
-          <label>
-            Operación
-            <select value={type} onChange={(e) => setType(e.target.value as CartInput['type'])}>
-              <option value="SALE">Venta</option>
-              <option value="EMPLOYEE">Consumo de empleado · −20%</option>
-              {can(user, 'owner') && <option value="OWNER">Retiro del dueño · a costo</option>}
-            </select>
-          </label>
-          {!lines.length && (
-            <div className="empty">
-              <ShoppingBasket size={36} style={{ margin: '0 auto 12px' }} />
-              <p>Tu próxima venta empieza acá.</p>
-              <small>Agregá productos al carrito.</small>
-            </div>
-          )}
-          {lines.map((l) => (
-            <div key={l.key} className="cart-line stack">
-              <div className="row between">
-                <strong>{l.name}</strong>
-                <button
-                  aria-label={`Quitar ${l.name}`}
-                  onClick={() => setLines(lines.filter((i) => i.key !== l.key))}
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-              <div className="row between">
-                <div className="quantity row">
-                  <button
-                    aria-label={`Restar ${l.name}`}
-                    onClick={() =>
-                      setLines(
-                        lines
-                          .map((i) => (i.key === l.key ? { ...i, quantity: i.quantity - 1 } : i))
-                          .filter((i) => i.quantity > 0),
-                      )
-                    }
-                  >
-                    <Minus size={15} />
-                  </button>
-                  <span>{l.quantity}</span>
-                  <button
-                    aria-label={`Sumar ${l.name}`}
-                    onClick={() =>
-                      setLines(
-                        lines.map((i) =>
-                          i.key === l.key ? { ...i, quantity: i.quantity + 1 } : i,
-                        ),
-                      )
-                    }
-                  >
-                    <Plus size={15} />
-                  </button>
-                </div>
-                <span>{money(l.price * l.quantity)}</span>
-              </div>
-            </div>
-          ))}
-          {type === 'OWNER' && (
-            <label>
-              Motivo del retiro
-              <input value={note} onChange={(e) => setNote(e.target.value)} required />
-            </label>
-          )}
-          <div className="stack">
-            <div className="row between">
-              <span className="muted">Subtotal</span>
-              <span>{money(quoteValid ? quotation.subtotal : displaySubtotal)}</span>
-            </div>
-            {quoteValid && quotation.adjustment !== 0 && (
-              <div className="row between">
-                <span className="muted">
-                  {type === 'EMPLOYEE' ? 'Descuento empleado' : 'Recargo nocturno'}
-                </span>
-                <span>{money(quotation.adjustment)}</span>
-              </div>
-            )}
-            <div className="row between">
-              <strong>Total</strong>
-              <span className="total">{money(total)}</span>
-            </div>
-          </div>
-          {type !== 'OWNER' && (
-            <>
-              <label>
-                Medio de pago
-                <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                  <option value="CASH">Efectivo</option>
-                  <option value="CARD">Tarjeta</option>
-                  <option value="MP">Mercado Pago / Transferencia</option>
-                  <option value="MIXED">Mixto · Efectivo + MP</option>
-                </select>
-              </label>
-              {method === 'MIXED' && (
-                <>
-                  <label>
-                    Parte en efectivo ($)
-                    <input
-                      inputMode="decimal"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={cash}
-                      onChange={(e) => setCash(e.target.value)}
-                    />
-                  </label>
-                  <small>
-                    Mercado Pago: {money(total - (Number.isFinite(cashAmount) ? cashAmount : 0))}
-                  </small>
-                </>
-              )}
-              {['CASH', 'MIXED'].includes(method) && (
-                <>
-                  <label>
-                    Efectivo recibido ($)
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.01"
-                      value={received}
-                      onChange={(e) => setReceived(e.target.value)}
-                      placeholder="0"
-                    />
-                  </label>
-                  <div className="row between">
-                    <span className="muted">{change >= 0 ? 'Vuelto' : 'Falta'}</span>
-                    <strong>{money(Math.abs(change))}</strong>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-          <button
-            className="primary row between full"
-            disabled={
-              busy ||
-              !shift ||
-              !lines.length ||
-              (!quoteValid && !offlineReady) ||
-              (type === 'OWNER' && !note.trim())
-            }
-            onClick={() => void charge()}
-          >
-            <span>
-              {busy ? 'Guardando…' : type === 'OWNER' ? 'Registrar retiro' : 'Confirmar cobro'}
-            </span>
-            <ArrowRight size={19} />
-          </button>
-          <small style={{ textAlign: 'center' }}>
-            {offlineReady
-              ? 'Sin conexión: precio estimado, pendiente de validación.'
-              : lines.length && !quoteValid
-                ? 'Esperando cotización del servidor…'
-                : 'El cobro se registra una sola vez.'}
-          </small>
-        </aside>
-      </div>
-    </>
-  );
+  function addProduct(p: Product) {
+    add({ kind: 'product', key: p.id, productId: p.id, name: p.name, price: p.price });
+    setSearch('');
+    setPage(1);
+  }
+  async function scan() {
+    if (!search.trim()) return;
+    try {
+      const query = search.trim();
+      const candidates = online
+        ? (await request<ProductList>('catalog?q=' + encodeURIComponent(query))).products
+        : ((await readSnapshot(user.id))?.products || []).filter(
+            (p) =>
+              p.name.toLowerCase().includes(query.toLowerCase()) ||
+              p.barcode.toLowerCase().includes(query.toLowerCase()),
+          );
+      const p =
+        candidates.find((p) => p.barcode.toLowerCase() === query.toLowerCase()) ||
+        (candidates.length === 1 ? candidates[0] : undefined);
+      if (p) addProduct(p);
+      else setError('Elegí un producto de los resultados o revisá el código.');
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  return {
+    user,
+    products,
+    totalProducts,
+    page,
+    setPage,
+    quick,
+    categories,
+    category,
+    setCategory,
+    search,
+    setSearch: (value: string) => {
+      setSearch(value);
+      setProducts([]);
+      setLoading(true);
+    },
+    lines,
+    setLines,
+    type,
+    setType,
+    note,
+    setNote,
+    quotation,
+    shift,
+    method,
+    setMethod,
+    cash,
+    setCash,
+    received,
+    setReceived,
+    night,
+    busy,
+    loading,
+    error,
+    setError,
+    message,
+    custom,
+    setCustom,
+    online,
+    bindSearch,
+    add,
+    addProduct,
+    scan,
+    quoteValid,
+    offlineReady,
+    displaySubtotal,
+    total,
+    cashAmount,
+    change,
+    charge,
+  };
 }
-function PackageEmpty() {
-  return <ShoppingBasket size={32} style={{ margin: '0 auto 14px' }} />;
+export type PosModel = Omit<ReturnType<typeof usePos>, 'bindSearch'>;
+export function Pos() {
+  const { bindSearch, ...model } = usePos();
+  return <PosScreen model={model} inputRef={bindSearch} />;
 }

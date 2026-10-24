@@ -26,7 +26,10 @@ export async function currentShift(userId: string) {
   });
   const totals = { CASH: 0, MP: 0, CARD: 0 };
   for (const p of grouped) totals[p.method] = p._sum.amount || 0;
-  return { ...shift, totals, offlineToken: await offlinePermit(userId, shift.id) };
+  const saleCount = await db.operation.count({
+    where: { shiftId: shift.id, voidedAt: null, type: 'SALE' },
+  });
+  return { ...shift, totals, saleCount, offlineToken: await offlinePermit(userId, shift.id) };
 }
 export async function openShift(userId: string, body: unknown) {
   const input = z

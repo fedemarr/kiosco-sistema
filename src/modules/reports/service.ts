@@ -56,11 +56,14 @@ export async function report(url: URL) {
     days.set(s.businessDate, d);
     employees.set(s.userId, e);
   }
-  const [lowStock, pendingRequests] = await Promise.all([
+  const [lowStock, pendingRequests, lowStockCounts] = await Promise.all([
     db.$queryRaw<
       { id: string; name: string; stock: number; min_stock: number }[]
     >`SELECT id, name, stock, min_stock FROM products WHERE deleted_at IS NULL AND track_stock AND stock <= min_stock ORDER BY stock LIMIT 100`,
     db.stockRequest.count({ where: { status: 'PENDING' } }),
+    db.$queryRaw<
+      { count: number }[]
+    >`SELECT count(*)::int as count FROM products WHERE deleted_at IS NULL AND track_stock AND stock <= min_stock`,
   ]);
   return {
     from,
@@ -81,6 +84,7 @@ export async function report(url: URL) {
     })),
     shifts,
     lowStock,
+    lowStockCount: lowStockCounts[0].count,
     pendingRequests,
     truncated: shifts.length === 1000,
   };

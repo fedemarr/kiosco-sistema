@@ -31,6 +31,7 @@ export type Operation = {
   items: { name: string; quantity: number; subtotal: number }[];
 };
 export type Shift = {
+  saleCount?: number;
   offlineToken?: string;
   totals?: { CASH: number; MP: number; CARD: number };
   id: string;

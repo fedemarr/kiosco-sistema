@@ -39,7 +39,7 @@ test.beforeAll(async () => {
       price: 150000,
       cost: 80000,
       stock: 0,
-      minStock: 2,
+      minStock: 30,
     },
   });
   productId = p.id;
@@ -116,15 +116,19 @@ test('caja, turno, venta offline idempotente y diseño sin desborde', async ({ p
   await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
   await page.getByLabel('Contraseña', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
-  await expect(page.getByRole('heading', { name: 'Listos para un buen día.' })).toBeVisible();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
   await page.goto('/turnos');
   await page.getByLabel('Efectivo inicial en caja ($)').fill('1000');
   await page.getByRole('button', { name: 'Abrir turno', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Mañana', exact: true })).toBeVisible();
   await page.goto('/caja');
   await page.getByLabel('Buscar producto').fill(barcode);
-  await page.locator('.product-tile').filter({ hasText: 'Alfajor de prueba' }).first().click();
-  await page.getByLabel('Medio de pago').selectOption('MP');
+  await page.getByLabel('Buscar producto').press('Enter');
+  await expect(page.locator('.pos-cart-row')).toContainText(
+    barcode.replace('E2E-', 'Alfajor de prueba '),
+  );
+  await expect(page.getByRole('radio')).toHaveCount(4);
+  await page.getByRole('radio', { name: 'Mercado Pago', exact: true }).click();
   const charge = page.getByRole('button', { name: 'Confirmar cobro' });
   await expect(charge).toBeEnabled();
   await expect
@@ -146,9 +150,15 @@ test('caja, turno, venta offline idempotente y diseño sin desborde', async ({ p
   await charge.click();
   await expect(page.getByRole('status')).toContainText('pendiente');
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Listos para un buen día.' })).toBeVisible();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
   await expect(page.getByText('Ver cobros pendientes', { exact: true })).toBeVisible();
+  const restored = page.waitForEvent(
+    'framenavigated',
+    (frame) => frame === page.mainFrame() && new URL(frame.url()).pathname === '/caja',
+  );
   await page.context().setOffline(false);
+  await restored;
+  await page.waitForLoadState('load');
   await expect
     .poll(
       async () =>
@@ -173,6 +183,38 @@ test('caja, turno, venta offline idempotente y diseño sin desborde', async ({ p
     fullPage: true,
   });
   await page.goto('/reportes');
-  await expect(page.getByRole('heading', { name: 'Los números de tu kiosco.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Panel del dueño' })).toBeVisible();
+  const tabs = page.getByRole('navigation', { name: 'Panel del dueño', exact: true });
+  await expect(tabs.getByRole('button')).toHaveCount(6);
+  await tabs.getByRole('button', { name: 'Hoy', exact: true }).click();
   await expect(page.getByText('Alfajor de prueba', { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Distribución por medio de pago' })).toBeVisible();
+  await page.screenshot({
+    path: `.screenshots/reportes-hoy-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
+  for (const name of ['Semana', 'Empleados', 'Stock']) {
+    await tabs.getByRole('button', { name, exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true);
+  }
+  const lowRow = page
+    .locator('.low-stock-row')
+    .filter({ hasText: barcode.replace('E2E-', 'Alfajor de prueba ') });
+  await lowRow.getByRole('button', { name: 'Ingresar', exact: true }).click();
+  await page.getByLabel('Cantidad a sumar').fill('3');
+  await page.getByRole('button', { name: 'Registrar ingreso', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Ingreso registrado');
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(21);
+  await tabs.getByRole('button', { name: 'Alertas', exact: true }).click();
+  await page.getByLabel('Empleado', { exact: true }).selectOption(ownerId);
+  await page.getByLabel('Tipo de acción').selectOption('STOCK_ADJUSTED');
+  await page.getByRole('button', { name: 'Buscar', exact: true }).click();
+  await expect(page.locator('.audit-entry')).toHaveCount(1);
+  await expect(page.locator('.audit-entry').first()).toContainText('Unidades: 3');
+  await page.screenshot({
+    path: `.screenshots/reportes-alertas-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
 });

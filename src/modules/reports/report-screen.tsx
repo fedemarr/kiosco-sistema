@@ -1,16 +1,30 @@
 'use client';
 import { useState } from 'react';
-import { Download, TrendingUp, Wallet, ShoppingBasket, CircleDollarSign } from 'lucide-react';
+import {
+  Download,
+  TrendingUp,
+  Banknote,
+  Package,
+  ChartNoAxesCombined,
+  CalendarDays,
+  ClipboardCheck,
+  Users,
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  Sun,
+  Sunset,
+  Moon,
+} from 'lucide-react';
 import { useRemote } from '@/hooks/use-remote';
-import { businessDate, money, dateTime } from '@/lib/format';
-import { shiftNames, paymentNames, type Shift } from '@/lib/types';
-import { request, errorMessage } from '@/lib/client';
-import { OfflineReview } from '@/modules/offline/review';
-type Report = {
+import { businessDate, money } from '@/lib/format';
+import { shiftNames, type Shift } from '@/lib/types';
+import { ReportShifts } from './report-shifts';
+import { ReportStock, ReportAlerts } from './report-tools';
+export type Report = {
   total: number;
   cost: number;
   profit: number;
-  saleTotal: number;
   employeeTotal: number;
   saleCount: number;
   payments: { CASH: number; CARD: number; MP: number };
@@ -19,344 +33,405 @@ type Report = {
   employees: { id: string; name: string; count: number; total: number; average: number }[];
   shifts: Shift[];
   lowStock: { id: string; name: string; stock: number; min_stock: number }[];
+  lowStockCount: number;
   pendingRequests: number;
   truncated: boolean;
 };
+const tabs = [
+  { id: 'shifts', name: 'Turnos', icon: ClipboardCheck },
+  { id: 'today', name: 'Hoy', icon: CalendarDays },
+  { id: 'week', name: 'Semana', icon: ChartNoAxesCombined },
+  { id: 'employees', name: 'Empleados', icon: Users },
+  { id: 'stock', name: 'Stock', icon: Package },
+  { id: 'alerts', name: 'Alertas', icon: Bell },
+];
+const shiftIcons = { MORNING: Sun, AFTERNOON: Sunset, NIGHT: Moon };
+export const payColors = { CASH: '#22c55e', MP: '#06b6d4', CARD: '#60a5fa' };
+export const payLabels = { CASH: 'Efectivo', MP: 'Mercado Pago', CARD: 'Tarjeta' };
+function moveDate(day: string, amount: number) {
+  return new Date(new Date(day + 'T12:00:00-03:00').getTime() + amount * 86400000)
+    .toISOString()
+    .slice(0, 10);
+}
 export function ReportScreen() {
-  const [from, setFrom] = useState(businessDate());
-  const [to, setTo] = useState(businessDate());
-  const [tab, setTab] = useState('overview');
-  const [filter, setFilter] = useState('');
-  const [employeeFilter, setEmployeeFilter] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const remote = useRemote<Report>(`reports?from=${from}&to=${to}`);
+  const [date, setDate] = useState(businessDate());
+  const [tab, setTab] = useState('shifts');
+  const [shiftFilter, setShiftFilter] = useState('');
+  const from = tab === 'week' ? moveDate(date, -6) : date;
+  const remote = useRemote<Report>(`reports?from=${from}&to=${date}`);
   const d = remote.data;
-  function range(days: number) {
-    const now = new Date();
-    setTo(businessDate(now));
-    setFrom(businessDate(new Date(now.getTime() - (days - 1) * 86400000)));
-  }
+  const shifts = d?.shifts.filter((s) => !shiftFilter || s.type === shiftFilter) || [];
+  const operations = shifts.flatMap((s) => s.operations).filter((o) => o.type !== 'OWNER');
+  const shiftPayments = { CASH: 0, MP: 0, CARD: 0 };
+  for (const p of operations.flatMap((o) => o.payments)) shiftPayments[p.method] += p.amount;
+  const dashboard = tab === 'today' || tab === 'week';
+  return (
+    <div className="owner-panel">
+      <header className="owner-header">
+        <h1>Panel del dueño</h1>
+        <nav className="owner-tabs" aria-label="Panel del dueño">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              aria-current={tab === t.id ? 'page' : undefined}
+              className={tab === t.id ? 'selected' : ''}
+              onClick={() => setTab(t.id)}
+            >
+              <t.icon size={17} />
+              {t.name}
+            </button>
+          ))}
+        </nav>
+      </header>
+      <div className="owner-content">
+        {remote.error && (
+          <p className="error" role="alert">
+            {remote.error}
+          </p>
+        )}
+        {remote.loading && <p>Cargando reportes…</p>}
+        {d?.truncated && (
+          <p className="note">
+            El rango alcanzó 1.000 turnos. Elegí un período más corto para ver totales completos.
+          </p>
+        )}
+        {d && (
+          <>
+            {tab !== 'alerts' &&
+              tab !== 'stock' &&
+              (tab === 'shifts' ? (
+                <div className="shift-day-picker card">
+                  <div className="date-navigation">
+                    <button aria-label="Día anterior" onClick={() => setDate(moveDate(date, -1))}>
+                      <ChevronLeft />
+                    </button>
+                    <label>
+                      <strong>
+                        {date === businessDate()
+                          ? 'Hoy'
+                          : new Date(date + 'T12:00:00').toLocaleDateString('es-AR', {
+                              weekday: 'long',
+                            })}
+                      </strong>
+                      <input
+                        aria-label="Fecha de los turnos"
+                        type="date"
+                        value={date}
+                        max={businessDate()}
+                        onChange={(e) => {
+                          if (e.target.value) setDate(e.target.value);
+                        }}
+                      />
+                    </label>
+                    <button
+                      aria-label="Día siguiente"
+                      disabled={date >= businessDate()}
+                      onClick={() => setDate(moveDate(date, 1))}
+                    >
+                      <ChevronRight />
+                    </button>
+                  </div>
+                  <div className="shift-filter">
+                    <button
+                      className={!shiftFilter ? 'selected' : ''}
+                      onClick={() => setShiftFilter('')}
+                    >
+                      <CalendarDays size={18} />
+                      Todos
+                    </button>
+                    {Object.entries(shiftNames).map(([key, name]) => {
+                      const Icon = shiftIcons[key as keyof typeof shiftIcons];
+                      return (
+                        <button
+                          key={key}
+                          className={shiftFilter === key ? 'selected' : ''}
+                          onClick={() => setShiftFilter(key)}
+                        >
+                          <Icon size={18} />
+                          {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <input
+                  className="report-date"
+                  aria-label="Fecha del reporte"
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    if (e.target.value) setDate(e.target.value);
+                  }}
+                />
+              ))}
+            {tab === 'week' && (
+              <p className="muted">
+                Del {new Date(from + 'T12:00:00').toLocaleDateString('es-AR')} al{' '}
+                {new Date(date + 'T12:00:00').toLocaleDateString('es-AR')}
+              </p>
+            )}
+            {dashboard && (
+              <>
+                <div className="report-stats">
+                  {[
+                    { label: 'Total vendido', value: d.total, icon: Banknote, tone: 'violet' },
+                    { label: 'Ganancia neta', value: d.profit, icon: TrendingUp, tone: 'green' },
+                    { label: 'Costo repuesto', value: d.cost, icon: Package, tone: 'amber' },
+                    {
+                      label: 'Ventas',
+                      value: d.saleCount,
+                      icon: ChartNoAxesCombined,
+                      tone: 'purple',
+                    },
+                  ].map((s, i) => (
+                    <div className={`report-stat ${s.tone}`} key={s.label}>
+                      <span>
+                        <s.icon size={18} />
+                        {s.label}
+                      </span>
+                      <strong>{i === 3 ? s.value : money(s.value)}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div className="report-columns">
+                  <section className="report-card">
+                    <h2>Por medio de pago</h2>
+                    <PaymentDonut payments={d.payments} />
+                  </section>
+                  <section className="report-card">
+                    <h2>Por empleado</h2>
+                    {d.employees.map((e) => (
+                      <div className="employee-bar" key={e.id}>
+                        <div className="row between">
+                          <span>{e.name}</span>
+                          <strong>{money(e.total)}</strong>
+                        </div>
+                        <div className="mini-chart">
+                          <span style={{ width: `${d.total ? (e.total / d.total) * 100 : 0}%` }} />
+                        </div>
+                        <small>
+                          {e.count} ventas · {d.total ? Math.round((e.total / d.total) * 100) : 0}%
+                        </small>
+                      </div>
+                    ))}
+                    {!d.employees.length && <p className="empty">Sin ventas en este período.</p>}
+                  </section>
+                  <section className="report-card">
+                    <h2>Top productos</h2>
+                    {d.top.map((p, i) => (
+                      <div className="top-product" key={p.name}>
+                        <small>{i + 1}</small>
+                        <span>
+                          {p.name}
+                          <small>{p.quantity} unidades</small>
+                        </span>
+                        <strong>{money(p.total)}</strong>
+                      </div>
+                    ))}
+                    {!d.top.length && (
+                      <p className="empty">Todavía no hay ventas en este período.</p>
+                    )}
+                  </section>
+                </div>
+                {tab === 'week' && (
+                  <section className="report-card week-chart">
+                    <h2>Ventas de la semana</h2>
+                    <div className="week-bars">
+                      {Array.from({ length: 7 }, (_, i) => {
+                        const day = moveDate(from, i);
+                        const value = d.days.find((v) => v.day === day);
+                        const max = Math.max(1, ...d.days.map((v) => v.total));
+                        return (
+                          <div key={day}>
+                            <small>{money(value?.total || 0)}</small>
+                            <div className="week-track">
+                              <span style={{ height: `${((value?.total || 0) / max) * 100}%` }} />
+                            </div>
+                            <small>
+                              {new Date(day + 'T12:00:00').toLocaleDateString('es-AR', {
+                                weekday: 'short',
+                                day: 'numeric',
+                              })}
+                            </small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+                <small className="report-explanation">
+                  Incluye consumo de empleados: {money(d.employeeTotal)}. Ganancia según costos
+                  registrados; el costo repuesto corresponde al costo de lo vendido. Retiros del
+                  dueño separados.
+                </small>
+              </>
+            )}
+            {tab === 'shifts' && (
+              <>
+                <div className="shift-stats">
+                  <div className="report-stat violet">
+                    <span>Total del día</span>
+                    <strong>{money(operations.reduce((sum, o) => sum + o.total, 0))}</strong>
+                  </div>
+                  {Object.entries(shiftPayments).map(([key, value]) => (
+                    <div className="report-stat" key={key}>
+                      <span>{payLabels[key as keyof typeof payLabels]}</span>
+                      <strong style={{ color: payColors[key as keyof typeof payColors] }}>
+                        {money(value)}
+                      </strong>
+                    </div>
+                  ))}
+                  <div className="report-stat">
+                    <span>Ventas</span>
+                    <strong>{operations.filter((o) => o.type === 'SALE').length}</strong>
+                  </div>
+                </div>
+                <ReportShifts shifts={shifts} refresh={remote.refresh} />
+                <EmployeeTable shifts={shifts} />
+              </>
+            )}
+            {tab === 'employees' && <EmployeeTable shifts={d.shifts} />}
+            {tab === 'stock' && (
+              <ReportStock products={d.lowStock} count={d.lowStockCount} refresh={remote.refresh} />
+            )}
+            {tab === 'alerts' && <ReportAlerts />}
+            {tab !== 'alerts' && tab !== 'stock' && (
+              <a
+                className="report-export row"
+                href={`/api/exports?kind=reports&from=${from}&to=${date}`}
+                download
+              >
+                <Download size={16} />
+                Exportar Excel
+              </a>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+function PaymentDonut({ payments }: { payments: Report['payments'] }) {
+  const entries = Object.entries(payments) as [keyof typeof payColors, number][];
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+  let offset = 0;
   return (
     <>
-      <header className="page-head row between">
-        <div>
-          <p className="overline">Administración</p>
-          <h1>Los números de tu kiosco.</h1>
-          <p className="muted">Ventas, caja y resultados, en un solo lugar.</p>
-        </div>
-        <a className="navlink" href={`/api/exports?kind=reports&from=${from}&to=${to}`} download>
-          <Download size={18} />
-          Exportar Excel
-        </a>
-      </header>
-      <div className="card stack toolbar">
-        <OfflineReview />
-        <div className="fields">
-          <label>
-            Desde
-            <input
-              aria-label="Desde"
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
+      <svg
+        className="payment-donut"
+        viewBox="0 0 200 200"
+        role="img"
+        aria-label={total ? 'Distribución por medio de pago' : 'Sin pagos en este período'}
+      >
+        <circle cx="100" cy="100" r="74" fill="none" stroke="var(--line)" strokeWidth="30" />
+        {entries.map(([key, v]) => {
+          const length = total ? (v / total) * 464.956 : 0;
+          const start = offset;
+          offset += length;
+          return (
+            <circle
+              key={key}
+              cx="100"
+              cy="100"
+              r="74"
+              fill="none"
+              stroke={payColors[key]}
+              strokeWidth="30"
+              strokeDasharray={`${length} ${464.956 - length}`}
+              strokeDashoffset={-start}
+              transform="rotate(-90 100 100)"
             />
-          </label>
-          <label>
-            Hasta
-            <input
-              aria-label="Hasta"
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            />
-          </label>
-        </div>
-        <div className="row">
-          <button onClick={() => range(1)}>Hoy</button>
-          <button onClick={() => range(7)}>Últimos 7 días</button>
-          <button onClick={() => range(30)}>Últimos 30 días</button>
-        </div>
+          );
+        })}
+      </svg>
+      <div className="payment-legend">
+        {entries
+          .filter(([, v]) => v > 0 || !total)
+          .map(([key, value]) => (
+            <div className="row between" key={key}>
+              <span>
+                <i style={{ background: payColors[key] }} />
+                {payLabels[key]}
+              </span>
+              <strong>{money(value)}</strong>
+            </div>
+          ))}
       </div>
-      <div className="row toolbar">
-        {[
-          ['overview', 'Resumen'],
-          ['shifts', 'Turnos'],
-          ['employees', 'Empleados'],
-        ].map(([id, label]) => (
-          <button className={tab === id ? 'primary' : ''} key={id} onClick={() => setTab(id)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {(remote.error || error) && (
-        <p className="error" role="alert">
-          {remote.error || error}
-        </p>
-      )}
-      {remote.loading && <p>Cargando reportes…</p>}
-      {d && (
-        <>
-          {d.truncated && (
-            <p className="note">
-              Este rango alcanzó el límite de 1.000 turnos. Reducí las fechas para ver totales
-              completos.
-            </p>
-          )}
-          {d.pendingRequests > 0 && (
-            <p className="note">
-              Hay {d.pendingRequests} solicitudes de acceso al stock. Resolvelas en Usuarios.
-            </p>
-          )}
-          <div className="grid stats toolbar">
-            {[
-              { label: 'Cobrado', value: d.total, icon: Wallet },
-              { label: 'Costo vendido', value: d.cost, icon: CircleDollarSign },
-              { label: 'Ganancia', value: d.profit, icon: TrendingUp },
-              { label: 'Ventas', value: d.saleCount, icon: ShoppingBasket },
-            ].map((s, i) => (
-              <div className="card" key={s.label}>
-                <div className="row between">
-                  <p className="muted">{s.label}</p>
-                  <s.icon size={18} color="var(--muted)" />
-                </div>
-                <strong
-                  className="stat-value"
-                  style={{ color: i === 2 ? 'var(--accent)' : undefined }}
-                >
-                  {i === 3 ? s.value : money(s.value)}
-                </strong>
-              </div>
-            ))}
-          </div>
-          <small>
-            Consumo de empleados cobrado: {money(d.employeeTotal)} · Retiro del dueño separado de
-            ventas. Ganancia según costos registrados.
-          </small>
-          {tab === 'overview' && (
-            <div className="grid" style={{ marginTop: 20 }}>
-              <div className="card stack">
-                <h2>Por medio de pago</h2>
-                {Object.entries(d.payments).map(([key, amount]) => (
-                  <div key={key}>
-                    <div className="row between">
-                      <span>{paymentNames[key as keyof typeof paymentNames]}</span>
-                      <strong>{money(amount)}</strong>
-                    </div>
-                    <div className="mini-chart" style={{ marginTop: 8 }}>
-                      <span style={{ width: `${d.total ? (amount / d.total) * 100 : 0}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="card">
-                <h2>Productos más vendidos</h2>
-                {!d.top.length && <p className="empty">Todavía no hay ventas en este período.</p>}
-                {d.top.map((p, i) => (
-                  <div className="cart-line row between" key={p.name}>
-                    <span>
-                      <small>{String(i + 1).padStart(2, '0')} · </small>
-                      {p.name}
-                      <br />
-                      <small>{p.quantity} unidades</small>
-                    </span>
-                    <strong>{money(p.total)}</strong>
-                  </div>
-                ))}
-              </div>
-              <div className="card">
-                <h2>Evolución por día</h2>
-                {d.days.map((day) => (
-                  <div className="cart-line row between" key={day.day}>
-                    <span>{day.day}</span>
-                    <span>
-                      {money(day.total)}
-                      <br />
-                      <small>Ganancia {money(day.profit)}</small>
-                    </span>
-                  </div>
-                ))}
-                <p className="muted" style={{ marginTop: 16 }}>
-                  Proyección a 30 días:{' '}
-                  {money(
-                    Math.round(
-                      (d.total /
-                        Math.max(
-                          1,
-                          (new Date(to).getTime() - new Date(from).getTime()) / 86400000 + 1,
-                        )) *
-                        30,
-                    ),
-                  )}
-                  . Estimación según el promedio del rango.
-                </p>
-              </div>
-              <div className="card">
-                <h2>Stock para reponer</h2>
-                {d.lowStock.map((p) => (
-                  <div key={p.id} className="cart-line row between">
-                    <span>{p.name}</span>
-                    <span style={{ color: 'var(--amber)' }}>
-                      {p.stock} / mín. {p.min_stock}
-                    </span>
-                  </div>
-                ))}
-                {!d.lowStock.length && <p className="muted">Sin alertas de stock bajo.</p>}
-              </div>
-            </div>
-          )}
-          {tab === 'shifts' && (
-            <div className="stack" style={{ marginTop: 20 }}>
-              <label>
-                Empleado
-                <select value={employeeFilter} onChange={(e) => setEmployeeFilter(e.target.value)}>
-                  <option value="">Todos los empleados</option>
-                  {d.employees.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Filtrar por turno
-                <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-                  <option value="">Todos los turnos</option>
-                  {Object.entries(shiftNames).map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {d.shifts
-                .filter(
-                  (s) =>
-                    (!filter || s.type === filter) &&
-                    (!employeeFilter || s.user?.id === employeeFilter),
-                )
-                .map((s) => {
-                  const payments = { CASH: 0, MP: 0, CARD: 0 };
-                  for (const p of s.operations.flatMap((o) => o.payments))
-                    payments[p.method] += p.amount;
-                  return (
-                    <details className="card" key={s.id}>
-                      <summary>
-                        <strong>
-                          {shiftNames[s.type]} · {s.user?.name}
-                        </strong>
-                        <br />
-                        <small>
-                          {s.businessDate} ·{' '}
-                          {s.closedAt
-                            ? s.difference === 0
-                              ? 'Caja correcta'
-                              : `Diferencia ${money(s.difference || 0)}`
-                            : 'En curso'}{' '}
-                          ·{' '}
-                          {money(
-                            s.operations
-                              .filter((o) => o.type !== 'OWNER')
-                              .reduce((sum, o) => sum + o.total, 0),
-                          )}
-                        </small>
-                      </summary>
-                      <div className="stack" style={{ marginTop: 16 }}>
-                        <small>
-                          {dateTime(s.openedAt)} → {s.closedAt ? dateTime(s.closedAt) : 'Abierto'}
-                        </small>
-                        <div className="row">
-                          {Object.entries(payments).map(([method, value]) => (
-                            <span className="pill" key={method}>
-                              {paymentNames[method as keyof typeof payments]} {money(value)}
-                            </span>
-                          ))}
-                        </div>
-                        {s.closedAt && (
-                          <p>
-                            Caja inicial {money(s.openingCash)} · Esperado al cierre{' '}
-                            {money(s.expectedCash || 0)} · Contado {money(s.countedCash || 0)} ·
-                            Diferencia {money(s.difference || 0)}
-                          </p>
-                        )}
-                        {s.operations.map((o) => (
-                          <div className="cart-line" key={o.id}>
-                            <div className="row between">
-                              <strong>
-                                {money(o.total)} ·{' '}
-                                {o.type === 'EMPLOYEE'
-                                  ? 'Consumo empleado'
-                                  : o.type === 'OWNER'
-                                    ? 'Retiro del dueño'
-                                    : 'Venta'}
-                              </strong>
-                              <button
-                                className="danger"
-                                disabled={busy}
-                                onClick={async () => {
-                                  const reason = window.prompt('Motivo de la anulación:');
-                                  if (!reason) return;
-                                  setBusy(true);
-                                  try {
-                                    await request(`sales/${o.id}/void`, 'POST', { reason });
-                                    await remote.refresh();
-                                  } catch (e) {
-                                    setError(errorMessage(e));
-                                  } finally {
-                                    setBusy(false);
-                                  }
-                                }}
-                              >
-                                Anular
-                              </button>
-                            </div>
-                            <small>{dateTime(o.createdAt)}</small>
-                            <p>{o.items.map((i) => `${i.quantity} × ${i.name}`).join(', ')}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  );
-                })}
-              {!d.shifts.length && <p className="empty card">No hay turnos en este período.</p>}
-            </div>
-          )}
-          {tab === 'employees' && (
-            <div className="card table-wrap" style={{ marginTop: 20 }}>
-              <h2>Por empleado</h2>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Empleado</th>
-                    <th>Ventas</th>
-                    <th>Total cobrado</th>
-                    <th>Ticket promedio</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.employees.map((e) => (
-                    <tr key={e.id}>
-                      <td>
-                        <button
-                          onClick={() => {
-                            setEmployeeFilter(e.id);
-                            setTab('shifts');
-                          }}
-                        >
-                          {e.name}
-                        </button>
-                      </td>
-                      <td>{e.count}</td>
-                      <td>{money(e.total)}</td>
-                      <td>{money(e.average)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
     </>
+  );
+}
+function EmployeeTable({ shifts }: { shifts: Shift[] }) {
+  const employees = new Map<
+    string,
+    {
+      name: string;
+      count: number;
+      total: number;
+      saleTotal: number;
+      payments: { CASH: number; MP: number; CARD: number };
+      shifts: number;
+    }
+  >();
+  for (const s of shifts) {
+    const id = s.user?.id || '';
+    const e = employees.get(id) || {
+      name: s.user?.name || '',
+      count: 0,
+      total: 0,
+      saleTotal: 0,
+      payments: { CASH: 0, MP: 0, CARD: 0 },
+      shifts: 0,
+    };
+    e.shifts++;
+    for (const o of s.operations) {
+      if (o.type === 'OWNER') continue;
+      e.total += o.total;
+      if (o.type === 'SALE') {
+        e.count++;
+        e.saleTotal += o.total;
+      }
+      for (const p of o.payments) e.payments[p.method] += p.amount;
+    }
+    employees.set(id, e);
+  }
+  return (
+    <section className="report-card table-wrap employee-table">
+      <h2>Por empleado</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>EMPLEADO</th>
+            <th>VENTAS</th>
+            <th>EFECTIVO</th>
+            <th>MP</th>
+            <th>TARJETA</th>
+            <th>TOTAL</th>
+            <th>TICKET PROM.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...employees].map(([id, e]) => (
+            <tr key={id}>
+              <td>
+                <strong>{e.name}</strong>
+                <small>{e.shifts} turnos</small>
+              </td>
+              <td>{e.count}</td>
+              {Object.entries(e.payments).map(([k, v]) => (
+                <td style={{ color: payColors[k as keyof typeof payColors] }} key={k}>
+                  {money(v)}
+                </td>
+              ))}
+              <td>
+                <strong>{money(e.total)}</strong>
+              </td>
+              <td>{money(e.count ? Math.round(e.saleTotal / e.count) : 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!employees.size && <p className="empty">No hay movimientos en este período.</p>}
+    </section>
   );
 }
