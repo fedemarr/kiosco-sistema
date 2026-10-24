@@ -9,6 +9,8 @@ export type Product = {
   stock: number;
   minStock: number;
   trackStock: boolean;
+  sellable?: boolean;
+  reviewNote?: string | null;
 };
 export type Category = { id: string; name: string };
 export type Quick = {
@@ -21,6 +23,10 @@ export type Quick = {
 };
 export type Payment = { method: 'CASH' | 'CARD' | 'MP'; amount: number };
 export type Operation = {
+  note?: string | null;
+  historical?: boolean;
+  costKnown?: boolean;
+  unallocatedPayment?: number;
   id: string;
   type: 'SALE' | 'EMPLOYEE' | 'OWNER';
   total: number;
@@ -31,6 +37,7 @@ export type Operation = {
   items: { name: string; quantity: number; subtotal: number }[];
 };
 export type Shift = {
+  archived?: boolean;
   saleCount?: number;
   offlineToken?: string;
   totals?: { CASH: number; MP: number; CARD: number };

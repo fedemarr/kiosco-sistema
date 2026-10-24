@@ -40,7 +40,12 @@ export function ReportShifts({
                   {shiftNames[s.type]} · {s.user?.name}
                 </strong>
                 <small>
-                  {dateTime(s.openedAt)} → {s.closedAt ? dateTime(s.closedAt) : 'en curso'}
+                  {dateTime(s.openedAt)} →{' '}
+                  {s.closedAt
+                    ? dateTime(s.closedAt)
+                    : s.archived
+                      ? 'abierto en la copia'
+                      : 'en curso'}
                 </small>
               </span>
               <span>
@@ -67,20 +72,32 @@ export function ReportShifts({
                 )}
               </strong>
               <span className={s.closedAt ? 'cash-color' : 'amber-color'}>
-                {s.closedAt
-                  ? s.difference === 0
-                    ? '✓ Cerró'
-                    : `Dif. ${money(s.difference || 0)}`
-                  : 'En curso'}{' '}
+                {s.archived
+                  ? 'Histórico'
+                  : s.closedAt
+                    ? s.difference === 0
+                      ? '✓ Cerró'
+                      : `Dif. ${money(s.difference || 0)}`
+                    : 'En curso'}{' '}
                 ⌄
               </span>
             </summary>
             <div className="shift-expanded">
               <p>
                 Caja inicial {money(s.openingCash)}
-                {s.closedAt &&
+                {!s.archived &&
+                  s.closedAt &&
                   ` · Esperado ${money(s.expectedCash || 0)} · Contado ${money(s.countedCash || 0)}`}
+                {s.archived &&
+                  s.countedCash !== null &&
+                  ` · Cierre registrado: ${money(s.countedCash)}`}
               </p>
+              {s.archived && (
+                <p className="note">
+                  Turno histórico de consulta. No se vuelve a descontar stock. El archivo no incluye
+                  todos los movimientos necesarios para conciliar la caja anterior.
+                </p>
+              )}
               {s.operations.map((o) => (
                 <div className="cart-line" key={o.id}>
                   <div className="row between">
@@ -92,28 +109,34 @@ export function ReportShifts({
                           : 'Venta'}{' '}
                       · {money(o.total)}
                     </strong>
-                    <button
-                      className="danger"
-                      disabled={busy}
-                      onClick={async () => {
-                        const reason = window.prompt('Motivo de la anulación:');
-                        if (!reason) return;
-                        setBusy(true);
-                        setError('');
-                        try {
-                          await request(`sales/${o.id}/void`, 'POST', { reason });
-                          await refresh();
-                        } catch (e) {
-                          setError(errorMessage(e));
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                    >
-                      Anular
-                    </button>
+                    {!o.historical && (
+                      <button
+                        className="danger"
+                        disabled={busy}
+                        onClick={async () => {
+                          const reason = window.prompt('Motivo de la anulación:');
+                          if (!reason) return;
+                          setBusy(true);
+                          setError('');
+                          try {
+                            await request(`sales/${o.id}/void`, 'POST', { reason });
+                            await refresh();
+                          } catch (e) {
+                            setError(errorMessage(e));
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        Anular
+                      </button>
+                    )}
                   </div>
                   <small>{dateTime(o.createdAt)}</small>
+                  {o.historical && o.note && <small>{o.note}</small>}
+                  {!!o.unallocatedPayment && (
+                    <p className="muted">Mixto sin desglose: {money(o.unallocatedPayment)}</p>
+                  )}
                   <p>{o.items.map((i) => `${i.quantity} × ${i.name}`).join(', ')}</p>
                 </div>
               ))}

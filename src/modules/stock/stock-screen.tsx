@@ -206,6 +206,11 @@ export function StockScreen() {
                 </small>
               </div>
             </div>
+            {p.reviewNote && (
+              <p className="note" style={{ marginTop: 12 }}>
+                {p.reviewNote} Revisá y guardá el producto para confirmar sus datos.
+              </p>
+            )}
             <div className="row between" style={{ marginTop: 16 }}>
               <span
                 className="pill"

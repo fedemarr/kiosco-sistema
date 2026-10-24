@@ -140,6 +140,7 @@ const actions: Record<string, string> = {
   LOGIN: 'Inicio de sesión',
   PASSWORD_CHANGED: 'Cambio de contraseña',
   OFFLINE_REVIEWED: 'Cobro pendiente revisado',
+  LEGACY_IMPORTED: 'Migración de datos',
 };
 function describe(entry: AuditEntry) {
   const d = entry.detail;
@@ -152,6 +153,9 @@ function describe(entry: AuditEntry) {
   if (typeof d.note === 'string') parts.push(d.note);
   if (typeof d.reason === 'string') parts.push(d.reason);
   if (typeof d.name === 'string') parts.push(d.name);
+  if (typeof d.products === 'number') parts.push(`${d.products} productos`);
+  if (typeof d.sales === 'number') parts.push(`${d.sales} ventas históricas`);
+  if (typeof d.totalCents === 'number') parts.push(`Total histórico: ${money(d.totalCents)}`);
   return parts.join(' · ') || 'Movimiento registrado en el sistema.';
 }
 export function ReportAlerts() {

@@ -22,7 +22,7 @@ export async function priceCart(tx: Prisma.TransactionClient, input: CartInput, 
   for (const item of input.items) {
     if (item.kind === 'product') {
       const p = await tx.product.findUnique({ where: { id: item.productId } });
-      if (!p || p.deletedAt)
+      if (!p || p.deletedAt || !p.sellable)
         throw new AppError(
           'Un producto del carrito ya no está disponible.',
           409,
@@ -125,8 +125,10 @@ export async function checkout(user: Actor, body: unknown) {
     }
     return await transaction(async (tx) => {
       // Bloquear el turno serializa cobro/cierre y evita registrar ventas después del cierre.
-      await tx.$queryRaw`SELECT id FROM shifts WHERE user_id = ${user.id}::uuid AND closed_at IS NULL FOR UPDATE`;
-      const shift = await tx.shift.findFirst({ where: { userId: user.id, closedAt: null } });
+      await tx.$queryRaw`SELECT id FROM shifts WHERE user_id = ${user.id}::uuid AND closed_at IS NULL AND NOT archived FOR UPDATE`;
+      const shift = await tx.shift.findFirst({
+        where: { userId: user.id, closedAt: null, archived: false },
+      });
       if (!shift || shift.id !== input.shiftId)
         throw new AppError(
           'El turno de esta venta ya no está abierto. Si era una venta pendiente, el dueño debe revisarla.',
@@ -213,6 +215,12 @@ export async function voidOperation(user: Actor, id: string, reason: string) {
       include: { items: true, shift: true },
     });
     if (!operation) throw new AppError('Operación no encontrada.', 404);
+    if (operation.historical)
+      throw new AppError(
+        'Las ventas históricas importadas son de consulta. Registrá cualquier corrección actual por separado.',
+        409,
+        'HISTORICAL_OPERATION',
+      );
     if (operation.voidedAt) return operation;
     await tx.$queryRaw`SELECT id FROM shifts WHERE id = ${operation.shiftId}::uuid FOR UPDATE`;
     const changed = await tx.operation.updateMany({

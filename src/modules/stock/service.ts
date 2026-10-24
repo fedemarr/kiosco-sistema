@@ -54,6 +54,7 @@ export async function listProducts(url: URL, includeStock = false) {
   const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
   const where: Prisma.ProductWhereInput = {
     deletedAt: null,
+    ...(!includeStock ? { sellable: true } : {}),
     ...(q
       ? {
           OR: [
@@ -103,11 +104,16 @@ export async function saveProduct(userId: string, body: unknown, id?: string) {
         'MERGED_PRODUCT',
       );
     if (old && !old.deletedAt) throw new AppError('Ese código ya está en uso.', 409, 'CONFLICT');
-    const data = { ...input, barcode, deletedAt: null };
+    const data = { ...input, barcode, deletedAt: null, sellable: true, reviewNote: null };
     const product = id
       ? await tx.product.update({
           where: { id },
-          data: { ...input, ...(input.barcode ? { barcode: input.barcode } : {}) },
+          data: {
+            ...input,
+            sellable: true,
+            reviewNote: null,
+            ...(input.barcode ? { barcode: input.barcode } : {}),
+          },
         })
       : old
         ? await tx.product.update({ where: { id: old.id }, data })

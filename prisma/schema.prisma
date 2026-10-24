@@ -90,6 +90,8 @@ model Product {
   stock Int @default(0)
   minStock Int @default(0) @map("min_stock")
   trackStock Boolean @default(true) @map("track_stock")
+  sellable Boolean @default(true)
+  reviewNote String? @map("review_note")
   mergedIntoId String? @map("merged_into_id") @db.Uuid
   mergedInto Product? @relation("ProductMerges", fields: [mergedIntoId], references: [id])
   mergedSources Product[] @relation("ProductMerges")
@@ -108,6 +110,7 @@ model Shift {
   userId String @map("user_id") @db.Uuid
   user User @relation(fields: [userId], references: [id])
   type ShiftType
+  archived Boolean @default(false)
   businessDate String @map("business_date") @db.VarChar(10)
   openedAt DateTime @default(now()) @map("opened_at") @db.Timestamptz(3)
   closedAt DateTime? @map("closed_at") @db.Timestamptz(3)
@@ -127,6 +130,9 @@ model Operation {
   shiftId String @map("shift_id") @db.Uuid
   shift Shift @relation(fields: [shiftId], references: [id])
   type OperationType
+  historical Boolean @default(false)
+  costKnown Boolean @default(true) @map("cost_known")
+  unallocatedPayment Int @default(0) @map("unallocated_payment")
   subtotal Int
   adjustment Int
   total Int
@@ -225,6 +231,15 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+model ImportBatch {
+  id String @id @default(uuid()) @db.Uuid
+  source String @unique
+  checksum String
+  summary Json
+  sourceData Json @map("source_data")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@map("import_batches")
 }
 model RateLimit {
   key String @id

@@ -49,6 +49,7 @@ export async function exportWorkbook(kind: string, url: URL) {
       'Efectivo',
       'MP',
       'Tarjeta',
+      'Mixto sin desglose',
       'Total',
       'Esperado al cierre',
       'Contado',
@@ -66,19 +67,21 @@ export async function exportWorkbook(kind: string, url: URL) {
         payments.CASH / 100,
         payments.MP / 100,
         payments.CARD / 100,
-        (payments.CASH + payments.MP + payments.CARD) / 100,
+        s.operations.reduce((sum, o) => sum + o.unallocatedPayment, 0) / 100,
+        s.operations.filter((o) => o.type !== 'OWNER').reduce((sum, o) => sum + o.total, 0) / 100,
         s.expectedCash === null ? null : s.expectedCash / 100,
         s.countedCash === null ? null : s.countedCash / 100,
         s.difference === null ? null : s.difference / 100,
-        s.closedAt ? 'Cerrado' : 'Abierto',
+        s.archived ? 'Histórico' : s.closedAt ? 'Cerrado' : 'Abierto',
       ]);
     }
     const summary = workbook.addWorksheet('Resumen');
     summary.addRows([
       ['Concepto', 'Importe ($)'],
       ['Total cobrado', data.total / 100],
-      ['Costo', data.cost / 100],
-      ['Ganancia', data.profit / 100],
+      ['Costo', data.cost === null ? 'Sin costos históricos' : data.cost / 100],
+      ['Ganancia', data.profit === null ? 'Sin costos históricos' : data.profit / 100],
+      ['Mixto histórico sin desglose', data.payments.UNALLOCATED / 100],
       ['Ventas', data.saleCount],
       ['Consumo de empleados', data.employeeTotal / 100],
     ]);

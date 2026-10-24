@@ -8,7 +8,7 @@ import { cents } from '@/modules/stock/service';
 import { offlinePermit } from '@/modules/offline/permit';
 export async function currentShift(userId: string) {
   const shift = await db.shift.findFirst({
-    where: { userId, closedAt: null },
+    where: { userId, closedAt: null, archived: false },
     include: {
       operations: {
         where: { voidedAt: null },
@@ -37,7 +37,7 @@ export async function openShift(userId: string, body: unknown) {
     .strict()
     .parse(body);
   return transaction(async (tx) => {
-    if (await tx.shift.findFirst({ where: { userId, closedAt: null } }))
+    if (await tx.shift.findFirst({ where: { userId, closedAt: null, archived: false } }))
       throw new AppError('Ya tenés un turno abierto.', 409);
     const shift = await tx.shift.create({
       data: { ...input, userId, businessDate: businessDate(new Date(), input.type === 'NIGHT') },
@@ -49,9 +49,9 @@ export async function openShift(userId: string, body: unknown) {
 export async function closeShift(userId: string, body: unknown) {
   const input = z.object({ countedCash: cents }).strict().parse(body);
   return transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM shifts WHERE user_id = ${userId}::uuid AND closed_at IS NULL FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM shifts WHERE user_id = ${userId}::uuid AND closed_at IS NULL AND NOT archived FOR UPDATE`;
     const shift = await tx.shift.findFirst({
-      where: { userId, closedAt: null },
+      where: { userId, closedAt: null, archived: false },
       include: {
         operations: { where: { voidedAt: null }, include: { payments: true, items: true } },
       },

@@ -26,7 +26,13 @@ export async function report(url: URL) {
   const employee = operations.filter((o) => o.type === 'EMPLOYEE');
   const total = operations.reduce((s, o) => s + o.total, 0);
   const cost = operations.reduce((s, o) => s + o.cost, 0);
-  const payments = { CASH: 0, MP: 0, CARD: 0 };
+  const unknownCostCount = operations.filter((o) => !o.costKnown).length;
+  const payments = {
+    CASH: 0,
+    MP: 0,
+    CARD: 0,
+    UNALLOCATED: operations.reduce((sum, o) => sum + o.unallocatedPayment, 0),
+  };
   for (const p of operations.flatMap((o) => o.payments)) payments[p.method] += p.amount;
   const products = new Map<string, { name: string; quantity: number; total: number }>();
   for (const item of sales.flatMap((o) => o.items)) {
@@ -36,7 +42,7 @@ export async function report(url: URL) {
     p.total += item.subtotal;
     products.set(key, p);
   }
-  const days = new Map<string, { day: string; total: number; profit: number }>();
+  const days = new Map<string, { day: string; total: number; profit: number | null }>();
   const employees = new Map<
     string,
     { name: string; count: number; total: number; saleTotal: number }
@@ -46,7 +52,8 @@ export async function report(url: URL) {
     const e = employees.get(s.userId) || { name: s.user.name, count: 0, total: 0, saleTotal: 0 };
     for (const o of s.operations.filter((o) => o.type !== 'OWNER')) {
       d.total += o.total;
-      d.profit += o.total - o.cost;
+      if (!o.costKnown) d.profit = null;
+      else if (d.profit !== null) d.profit += o.total - o.cost;
       e.total += o.total;
       if (o.type === 'SALE') {
         e.count++;
@@ -69,8 +76,9 @@ export async function report(url: URL) {
     from,
     to,
     total,
-    cost,
-    profit: total - cost,
+    cost: unknownCostCount ? null : cost,
+    profit: unknownCostCount ? null : total - cost,
+    unknownCostCount,
     saleTotal: sales.reduce((s, o) => s + o.total, 0),
     employeeTotal: employee.reduce((s, o) => s + o.total, 0),
     saleCount: sales.length,

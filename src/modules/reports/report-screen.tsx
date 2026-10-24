@@ -23,13 +23,14 @@ import { ReportShifts } from './report-shifts';
 import { ReportStock, ReportAlerts } from './report-tools';
 export type Report = {
   total: number;
-  cost: number;
-  profit: number;
+  cost: number | null;
+  profit: number | null;
+  unknownCostCount: number;
   employeeTotal: number;
   saleCount: number;
-  payments: { CASH: number; CARD: number; MP: number };
+  payments: { CASH: number; CARD: number; MP: number; UNALLOCATED: number };
   top: { name: string; quantity: number; total: number }[];
-  days: { day: string; total: number; profit: number }[];
+  days: { day: string; total: number; profit: number | null }[];
   employees: { id: string; name: string; count: number; total: number; average: number }[];
   shifts: Shift[];
   lowStock: { id: string; name: string; stock: number; min_stock: number }[];
@@ -46,8 +47,18 @@ const tabs = [
   { id: 'alerts', name: 'Alertas', icon: Bell },
 ];
 const shiftIcons = { MORNING: Sun, AFTERNOON: Sunset, NIGHT: Moon };
-export const payColors = { CASH: '#22c55e', MP: '#06b6d4', CARD: '#60a5fa' };
-export const payLabels = { CASH: 'Efectivo', MP: 'Mercado Pago', CARD: 'Tarjeta' };
+export const payColors = {
+  CASH: '#22c55e',
+  MP: '#06b6d4',
+  CARD: '#60a5fa',
+  UNALLOCATED: '#fbbf24',
+};
+export const payLabels = {
+  CASH: 'Efectivo',
+  MP: 'Mercado Pago',
+  CARD: 'Tarjeta',
+  UNALLOCATED: 'Mixto histórico sin desglose',
+};
 function moveDate(day: string, amount: number) {
   return new Date(new Date(day + 'T12:00:00-03:00').getTime() + amount * 86400000)
     .toISOString()
@@ -57,7 +68,9 @@ export function ReportScreen() {
   const [date, setDate] = useState(businessDate());
   const [tab, setTab] = useState('shifts');
   const [shiftFilter, setShiftFilter] = useState('');
-  const from = tab === 'week' ? moveDate(date, -6) : date;
+  const [rangeStart, setRangeStart] = useState('');
+  const rangeEnabled = tab === 'shifts' || tab === 'employees';
+  const from = rangeEnabled && rangeStart ? rangeStart : tab === 'week' ? moveDate(date, -6) : date;
   const remote = useRemote<Report>(`reports?from=${from}&to=${date}`);
   const d = remote.data;
   const shifts = d?.shifts.filter((s) => !shiftFilter || s.type === shiftFilter) || [];
@@ -65,6 +78,10 @@ export function ReportScreen() {
   const shiftPayments = { CASH: 0, MP: 0, CARD: 0 };
   for (const p of operations.flatMap((o) => o.payments)) shiftPayments[p.method] += p.amount;
   const dashboard = tab === 'today' || tab === 'week';
+  const unallocated =
+    tab === 'shifts'
+      ? operations.reduce((sum, o) => sum + (o.unallocatedPayment || 0), 0)
+      : d?.payments.UNALLOCATED || 0;
   return (
     <div className="owner-panel">
       <header className="owner-header">
@@ -84,12 +101,29 @@ export function ReportScreen() {
         </nav>
       </header>
       <div className="owner-content">
+        {dashboard && !!d?.unknownCostCount && (
+          <p className="note">
+            {d.unknownCostCount} ventas históricas no incluyen costos de esa fecha. Costo y ganancia
+            se muestran sin datos para ese período.
+          </p>
+        )}
+        {!!unallocated && (
+          <p className="note">
+            Pagos mixtos históricos sin desglose: {money(unallocated)}. El total vendido se
+            conserva; esos importes no se asignan a efectivo ni Mercado Pago.
+          </p>
+        )}
         {remote.error && (
           <p className="error" role="alert">
             {remote.error}
           </p>
         )}
         {remote.loading && <p>Cargando reportes…</p>}
+        {rangeEnabled && rangeStart && (
+          <p className="muted">
+            Período: {from.split('-').reverse().join('/')} al {date.split('-').reverse().join('/')}
+          </p>
+        )}
         {d?.truncated && (
           <p className="note">
             El rango alcanzó 1.000 turnos. Elegí un período más corto para ver totales completos.
@@ -190,7 +224,9 @@ export function ReportScreen() {
                         <s.icon size={18} />
                         {s.label}
                       </span>
-                      <strong>{i === 3 ? s.value : money(s.value)}</strong>
+                      <strong>
+                        {s.value === null ? 'Sin datos' : i === 3 ? s.value : money(s.value)}
+                      </strong>
                     </div>
                   ))}
                 </div>
@@ -237,6 +273,10 @@ export function ReportScreen() {
                 {tab === 'week' && (
                   <section className="report-card week-chart">
                     <h2>Ventas de la semana</h2>
+                    <p className="muted">
+                      Proyección a 30 días: {money(Math.round((d.total / 7) * 30))}. Estimación
+                      según el promedio de estos siete días.
+                    </p>
                     <div className="week-bars">
                       {Array.from({ length: 7 }, (_, i) => {
                         const day = moveDate(from, i);
@@ -296,6 +336,37 @@ export function ReportScreen() {
               <ReportStock products={d.lowStock} count={d.lowStockCount} refresh={remote.refresh} />
             )}
             {tab === 'alerts' && <ReportAlerts />}
+            {rangeEnabled && (
+              <details className="report-card" style={{ marginTop: 20 }}>
+                <summary>Elegir rango de fechas</summary>
+                <div className="fields" style={{ marginTop: 16 }}>
+                  <label>
+                    Desde
+                    <input
+                      type="date"
+                      value={rangeStart || date}
+                      max={date}
+                      onChange={(e) => setRangeStart(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Hasta
+                    <input
+                      type="date"
+                      value={date}
+                      min={rangeStart || undefined}
+                      onChange={(e) => {
+                        if (e.target.value) setDate(e.target.value);
+                      }}
+                    />
+                  </label>
+                </div>
+                <button style={{ marginTop: 12 }} onClick={() => setRangeStart('')}>
+                  Ver un solo día
+                </button>
+                <small> Hasta 93 días por consulta.</small>
+              </details>
+            )}
             {tab !== 'alerts' && tab !== 'stock' && (
               <a
                 className="report-export row"
