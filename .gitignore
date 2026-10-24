@@ -14,3 +14,5 @@ data/
 productos.*
 usuarios.json
 turnos_ultimos_100.json
+
+.vercel

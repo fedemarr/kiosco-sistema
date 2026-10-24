@@ -1,4 +1,4 @@
-# Progreso · 23/10/2026
+# Progreso · 24/10/2026
 
 ## Alcance y referencias
 Sistema nuevo con Node/Next.js, Supabase y Vercel, sin Railway. Leídos completos PROMPT_CODEX.md y PROMPT_NUEVO_SISTEMA.md. No estaba docs/ESPECIFICACION.md: se siguieron ambos prompts. La importación real quedó pospuesta por pedido explícito; archivos originales intactos y excluidos de Git.
@@ -11,7 +11,7 @@ Sistema nuevo con Node/Next.js, Supabase y Vercel, sin Railway. Leídos completo
 - **4 — Reportes implementados:** resumen, medios de pago, costo/ganancia, top productos, evolución/proyección, turnos por fecha de negocio y empleado, detalle, ticket promedio, solicitudes, auditoría con filtros y exportación Excel. Anulaciones excluidas. Rango máximo 93 días y 1.000 turnos, con aviso al alcanzar el límite.
 - **5 — PWA/offline implementados:** iconos, manifest, shell público para reapertura sin red, catálogo local sin costos, cola IndexedDB, autorización firmada por usuario/turno, reintentos con misma clave y sincronización al reconectar y periódica. Rechazos por stock/precio/turno guardados en DB para el dueño, con resolución auditada. API y documentos autenticados nunca cacheados. Refresco al volver al primer plano; stock cada 15 segundos.
 - **6 — Importación histórica pospuesta:** no se ejecutó ni desarrolló importador de JSON/pg_dump antiguos. La importación Excel operativa está disponible y probada con archivo sintético. No se importaron productos, usuarios ni ventas anteriores.
-- **7 — Supabase conectado y guía lista:** TLS verificado, cuatro migraciones aplicadas y seed de configuración. Base remota verificada vacía antes de escribir. Ahora 0 productos, 0 usuarios y 0 operaciones; 10 categorías y 3 botones rápidos. RLS en todas las tablas, incluido historial de migraciones. Falta crear dueño y publicar en Vercel; no hay deploy público todavía.
+- **7 — Publicación en Vercel en curso:** Supabase con TLS verificado, cuatro migraciones aplicadas y RLS en todas las tablas. Base con 0 productos, 1 dueño creado por pedido explícito y 0 operaciones; 10 categorías y 3 botones rápidos. Proyecto Vercel kiosco-sistema creado en fmcodes-projects, variables de producción cargadas como secretos y región gru1. Paquete de despliegue revisado: no contiene .env ni datos originales. URL asignada: https://kiosco-sistema-beta.vercel.app. Falta terminar build remoto y verificar acceso público.
 
 ## Verificación
 - TypeScript estricto, tipos de rutas Next, lint y build de producción.

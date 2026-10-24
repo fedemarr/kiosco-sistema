@@ -1,0 +1,15 @@
+# Solo subir los archivos necesarios para compilar la aplicación.
+/*
+!/src
+!/public
+!/prisma
+!/certs
+!/package.json
+!/package-lock.json
+!/next.config.ts
+!/next-env.d.ts
+!/tsconfig.json
+!/postcss.config.mjs
+!/prisma.config.ts
+!/vercel.json
+src/generated/
