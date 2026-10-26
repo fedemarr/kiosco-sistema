@@ -1,5 +1,11 @@
 # Progreso · 24/10/2026
 
+## Controles compactos · 26/10/2026
+- Menú lateral de 216 px (antes 256), enlaces de 44 px y tipografía/iconos más pequeños. Más ancho disponible para productos.
+- Filas del carrito con 2 px de padding vertical y controles visibles de cantidad más pequeños, conservando un área táctil de 44 px. Métodos de pago en una fila de 44 px en escritorio y botón Cobrar de 48 px; menor separación en el pie.
+- Conserva el scroll del carrito y el aviso nocturno. Cache offline v9. Cambio exclusivamente visual, sin modificar ventas ni stock.
+- Validación: lint, build con TypeScript y 10 pruebas E2E aprobadas. Captura de escritorio revisada con 12 productos: más filas visibles y cobro accesible; controles táctiles de 44 px verificados.
+
 ## Tarifa nocturna visible · 26/10/2026
 - Franja ámbar con luna sobre el buscador: “Tarifa nocturna activa — +10% (22:00 a 06:00)”. Botón Cobrar ámbar con luna y desglose del importe del recargo en ventas. Estilo basado en la captura del sistema anterior.
 - Se conserva el cálculo existente: +10% en ventas entre 22:00 inclusive y 06:00 exclusive de Buenos Aires, para todos los medios de pago; consumos y retiros conservan sus reglas. No se aplica el recargo dos veces.
