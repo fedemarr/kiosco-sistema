@@ -171,7 +171,7 @@ export function ReportAlerts() {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const users = useRemote<{ id: string; name: string }[]>('users');
-  const remote = useRemote<AuditEntry[]>(`audit?page=${page}${query}`);
+  const remote = useRemote<AuditEntry[]>(`audit?page=${page}${query}`, 2000);
   function search() {
     const q = new URLSearchParams();
     if (filter.user) q.set('user', filter.user);

@@ -1,5 +1,12 @@
 # Progreso · 24/10/2026
 
+## Reportes automáticos y día operativo · 26/10/2026
+- Investigación de solo lectura en Supabase: las 4 ventas iniciales de Yoel, por $14.190, estaban guardadas en su turno NIGHT del día operativo 25/10 aunque una se registró después de medianoche del 26/10. No se alteraron ventas ni turnos reales.
+- El reporte abre por defecto el día operativo actual (06:00 a 06:00 de Buenos Aires), igual en API y pantalla. Avanza automáticamente a las 06:00; una fecha elegida manualmente se conserva, con opción “Ver día actual”.
+- Reportes y alertas consultan cada 2 segundos en pestañas visibles, con actualización al recuperar foco/conexión. Se muestra última consulta y estado de error/reintento. El resto de las pantallas conserva su intervalo de 15 segundos. Se evitan consultas superpuestas y respuestas de filtros anteriores.
+- Cache offline v10. Pruebas locales cubren ventas/anulaciones desde otra sesión con reporte abierto, madrugada, cambio a las 06:00 y conservación de filtros.
+- Validación: build de producción, TypeScript, lint, 38 pruebas PostgreSQL/lógica y 14 E2E aprobadas en bases locales. Los reportes reales se contrastaron por lectura directa; no se crearon operaciones de prueba en Supabase.
+
 ## Controles compactos · 26/10/2026
 - Menú lateral de 216 px (antes 256), enlaces de 44 px y tipografía/iconos más pequeños. Más ancho disponible para productos.
 - Filas del carrito con 2 px de padding vertical y controles visibles de cantidad más pequeños, conservando un área táctil de 44 px. Métodos de pago en una fila de 44 px en escritorio y botón Cobrar de 48 px; menor separación en el pie.

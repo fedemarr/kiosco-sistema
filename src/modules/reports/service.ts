@@ -4,7 +4,7 @@ import { businessDate } from '@/lib/format';
 import { AppError } from '@/lib/errors';
 export function reportRange(url: URL) {
   const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-  const from = day.parse(url.searchParams.get('from') || businessDate());
+  const from = day.parse(url.searchParams.get('from') || businessDate(new Date(), true));
   const to = day.parse(url.searchParams.get('to') || from);
   if (from > to || new Date(to).getTime() - new Date(from).getTime() > 92 * 86400000)
     throw new AppError('Elegí un rango válido de hasta 93 días.');

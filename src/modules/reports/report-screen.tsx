@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Download,
   TrendingUp,
@@ -65,13 +65,26 @@ function moveDate(day: string, amount: number) {
     .slice(0, 10);
 }
 export function ReportScreen() {
-  const [date, setDate] = useState(businessDate());
+  const [today, setToday] = useState(() => businessDate(new Date(), true));
+  const [selectedDate, setDate] = useState<string | null>(null);
+  const date = selectedDate ?? today;
+  useEffect(() => {
+    const update = () => setToday(businessDate(new Date(), true));
+    const timer = setInterval(update, 2000);
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, []);
   const [tab, setTab] = useState('shifts');
   const [shiftFilter, setShiftFilter] = useState('');
   const [rangeStart, setRangeStart] = useState('');
   const rangeEnabled = tab === 'shifts' || tab === 'employees';
   const from = rangeEnabled && rangeStart ? rangeStart : tab === 'week' ? moveDate(date, -6) : date;
-  const remote = useRemote<Report>(`reports?from=${from}&to=${date}`);
+  const remote = useRemote<Report>(`reports?from=${from}&to=${date}`, 2000);
   const d = remote.data;
   const shifts = d?.shifts.filter((s) => !shiftFilter || s.type === shiftFilter) || [];
   const operations = shifts.flatMap((s) => s.operations).filter((o) => o.type !== 'OWNER');
@@ -101,6 +114,26 @@ export function ReportScreen() {
         </nav>
       </header>
       <div className="owner-content">
+        <div className="row between report-live" aria-label="Estado de actualización de reportes">
+          <small>
+            {remote.error
+              ? 'Sin actualizar · reintentando automáticamente'
+              : 'Actualización automática cada 2 s'}
+            {remote.updatedAt &&
+              ` · Última consulta ${new Date(remote.updatedAt).toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}`}
+            {' · Día operativo: 06:00 a 06:00'}
+          </small>
+          {selectedDate !== null && (
+            <button
+              onClick={() => {
+                setDate(null);
+                setRangeStart('');
+              }}
+            >
+              Ver día actual
+            </button>
+          )}
+        </div>
         {dashboard && !!d?.unknownCostCount && (
           <p className="note">
             {d.unknownCostCount} ventas históricas no incluyen costos de esa fecha. Costo y ganancia
@@ -141,7 +174,7 @@ export function ReportScreen() {
                     </button>
                     <label>
                       <strong>
-                        {date === businessDate()
+                        {date === today
                           ? 'Hoy'
                           : new Date(date + 'T12:00:00').toLocaleDateString('es-AR', {
                               weekday: 'long',

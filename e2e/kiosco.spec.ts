@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test';
 import bcrypt from 'bcryptjs';
 import { db } from '../src/lib/db';
-import { money } from '../src/lib/format';
+import { money, businessDate } from '../src/lib/format';
 const password = `Test-${crypto.randomUUID()}`;
 let ownerId: string;
 let sellerId: string;
 let ownerLogin: string;
 let sellerLogin: string;
+let sellerName: string;
 let productId: string;
 let barcode: string;
 test.beforeAll(async () => {
@@ -15,6 +16,7 @@ test.beforeAll(async () => {
   const tag = crypto.randomUUID().slice(0, 8);
   ownerLogin = `e2e-owner-${tag}`;
   sellerLogin = `e2e-seller-${tag}`;
+  sellerName = `Vendedor de prueba ${tag}`;
   const passwordHash = await bcrypt.hash(password, 12);
   const owner = await db.user.create({
     data: {
@@ -27,7 +29,7 @@ test.beforeAll(async () => {
   });
   ownerId = owner.id;
   const seller = await db.user.create({
-    data: { name: 'Vendedor de prueba', username: sellerLogin, passwordHash, role: 'SELLER' },
+    data: { name: sellerName, username: sellerLogin, passwordHash, role: 'SELLER' },
   });
   sellerId = seller.id;
   const c = await db.category.create({ data: { name: `E2E ${tag}` } });
@@ -269,6 +271,8 @@ test('caja, turno, venta offline idempotente y diseño sin desborde', async ({ p
   });
   await page.goto('/reportes');
   await expect(page.getByRole('heading', { name: 'Panel del dueño' })).toBeVisible();
+  // Esta prueba abre un turno de mañana, incluso si se ejecuta de madrugada.
+  await page.getByLabel('Fecha de los turnos').fill(businessDate());
   const tabs = page.getByRole('navigation', { name: 'Panel del dueño', exact: true });
   await expect(tabs.getByRole('button')).toHaveCount(6);
   await tabs.getByRole('button', { name: 'Hoy', exact: true }).click();
@@ -304,6 +308,107 @@ test('caja, turno, venta offline idempotente y diseño sin desborde', async ({ p
   });
 });
 
+test('reportes siguen el día operativo a las 06 y conservan una fecha elegida', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-10-26T08:59:59Z'));
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  await page.goto('/reportes');
+  const date = page.getByLabel('Fecha de los turnos');
+  await expect(date).toHaveValue('2026-10-25');
+  await page.clock.setFixedTime(new Date('2026-10-26T09:00:01Z'));
+  await expect(date).toHaveValue('2026-10-26');
+  await date.fill('2026-10-24');
+  await page.clock.setFixedTime(new Date('2026-10-27T09:00:00Z'));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(date).toHaveValue('2026-10-24');
+  await page.getByRole('button', { name: 'Ver día actual', exact: true }).click();
+  await expect(date).toHaveValue('2026-10-27');
+});
+test('reportes reciben ventas y anulaciones de otra sesión sin recargar', async ({
+  page,
+  playwright,
+  baseURL,
+}) => {
+  const seller = await playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Origin: baseURL! },
+  });
+  try {
+    expect(
+      (
+        await seller.post('/api/auth/login', { data: { username: sellerLogin, password } })
+      ).status(),
+    ).toBe(200);
+    const opened = await seller.post('/api/shifts/open', {
+      data: { type: 'NIGHT', openingCash: 0 },
+    });
+    expect(opened.status()).toBe(200);
+    const shift = (await opened.json()).data;
+    await page.goto('/login');
+    await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+    await page.getByLabel('Contraseña', { exact: true }).fill(password);
+    await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+    await expect(page.getByLabel('Buscar producto')).toBeVisible();
+    await page.goto('/reportes');
+    await expect(page.getByLabel('Fecha de los turnos')).toHaveValue(
+      businessDate(new Date(), true),
+    );
+    await page
+      .getByRole('navigation', { name: 'Panel del dueño', exact: true })
+      .getByRole('button', { name: 'Hoy', exact: true })
+      .click();
+    const count = page
+      .locator('.report-stat')
+      .filter({ hasText: /^Ventas/ })
+      .locator('strong');
+    await expect(count).toBeVisible();
+    const before = Number(await count.textContent());
+    const cart = { type: 'SALE', items: [{ kind: 'product', productId, quantity: 1 }] };
+    const quoted = await seller.post('/api/sales/quote', { data: cart });
+    expect(quoted.status()).toBe(200);
+    const q = (await quoted.json()).data;
+    const sold = await seller.post('/api/sales', {
+      data: {
+        ...cart,
+        shiftId: shift.id,
+        idempotencyKey: crypto.randomUUID(),
+        quoteToken: q.quoteToken,
+        payments: [{ method: 'MP', amount: q.total }],
+      },
+    });
+    expect(sold.status()).toBe(200);
+    await expect(count).toHaveText(String(before + 1), { timeout: 10000 });
+    await expect(page.locator('.employee-bar').filter({ hasText: sellerName })).toContainText(
+      money(q.total),
+    );
+    const operation = await db.operation.findFirstOrThrow({
+      where: { userId: sellerId, shiftId: shift.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(
+      (
+        await page.request.post(`/api/sales/${operation.id}/void`, {
+          headers: { Origin: baseURL! },
+          data: { reason: 'Anulacion de prueba de reporte automatico' },
+        })
+      ).status(),
+    ).toBe(200);
+    await expect(count).toHaveText(String(before), { timeout: 10000 });
+    await expect(page.getByLabel('Estado de actualización de reportes')).toContainText(
+      'Última consulta',
+    );
+    expect((await seller.post('/api/shifts/close', { data: { countedCash: 0 } })).status()).toBe(
+      200,
+    );
+  } finally {
+    await seller.dispose();
+  }
+});
 test('respuestas perdidas y recargas no duplican una venta ni una carga de mercadería', async ({
   page,
   baseURL,

@@ -909,6 +909,9 @@ dialog::backdrop {
 .owner-content {
   padding: 24px 28px;
 }
+.report-live {
+  margin-bottom: 14px;
+}
 .report-date {
   height: 56px;
   background: #1e293b;
