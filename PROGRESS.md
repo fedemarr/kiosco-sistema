@@ -1,5 +1,11 @@
 # Progreso · 24/10/2026
 
+## Ajuste de carrito POS · 26/10/2026
+- Panel limitado al alto de la ventana; buscador y cobro fuera del scroll, cuerpo flexible con min-height: 0 y lista con scroll vertical propio. Búsqueda y venta rápida usan el cuerpo disponible al abrirse.
+- Filas más compactas, controles táctiles de 44 × 44 px, avisos acotados con scroll para conservar espacio sin conexión. Los avisos de cotización quedan antes del total para evitar que muevan el botón Cobrar.
+- Cache offline v7. Sin cambios en ventas, stock, pagos ni datos de producción.
+- Validación: lint, TypeScript y build correctos; 8 pruebas E2E aprobadas en PostgreSQL local, incluida regresión de 12 productos y edición/eliminación del último ítem en 390×844, 1024×768, 1280×720 y 1366×768 con efectivo, mixto y Mercado Pago. Capturas inspeccionadas en celular y escritorio.
+
 ## Alcance y referencias
 Sistema nuevo con Node/Next.js, Supabase y Vercel, sin Railway. Leídos completos PROMPT_CODEX.md y PROMPT_NUEVO_SISTEMA.md. No estaba docs/ESPECIFICACION.md: se siguieron ambos prompts. La importación de los archivos disponibles fue autorizada y aplicada el 24/10/2026; originales intactos y excluidos de Git.
 

@@ -67,6 +67,67 @@ test.afterAll(async () => {
   });
   await db.$disconnect();
 });
+test('carrito largo con scroll interno y cobro visible', async ({ page }, testInfo) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  for (let i = 1; i <= 12; i++) {
+    await page.getByRole('button', { name: 'Venta rápida', exact: true }).click();
+    await page.getByLabel('Descripción', { exact: true }).fill(`Producto de mostrador ${i}`);
+    await page.getByLabel('Precio ($)', { exact: true }).fill('100');
+    await page.getByRole('button', { name: 'Agregar al carrito', exact: true }).click();
+  }
+  const cart = page.getByRole('region', { name: 'Carrito', exact: true });
+  const charge = page.getByRole('button', { name: 'Confirmar cobro' });
+  const sizes =
+    testInfo.project.name === 'desktop'
+      ? [
+          { width: 1366, height: 768 },
+          { width: 1280, height: 720 },
+          { width: 1024, height: 768 },
+        ]
+      : [{ width: 390, height: 844 }];
+  for (const size of sizes) {
+    await page.setViewportSize(size);
+    for (const method of ['Efectivo', 'Mixto', 'Mercado Pago']) {
+      await page.getByRole('radio', { name: method, exact: true }).click();
+      await expect
+        .poll(() =>
+          cart.evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight > 70),
+        )
+        .toBe(true);
+      const initial = await charge.boundingBox();
+      expect(initial!.y + initial!.height).toBeLessThanOrEqual(
+        size.height - (size.width < 700 ? 65 : 0),
+      );
+      await cart.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      const last = page.getByRole('button', {
+        name: 'Sumar Producto de mostrador 12',
+        exact: true,
+      });
+      await expect(last).toBeInViewport();
+      await last.click();
+      const after = await charge.boundingBox();
+      expect(after!.y).toBeCloseTo(initial!.y, 0);
+      const target = await last.boundingBox();
+      expect(target!.height).toBeGreaterThanOrEqual(44);
+      expect(target!.width).toBeGreaterThanOrEqual(44);
+      await page
+        .getByRole('button', { name: 'Restar Producto de mostrador 12', exact: true })
+        .click();
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .toBe(true);
+    }
+    await page.screenshot({ path: `.screenshots/carrito-${size.width}x${size.height}.png` });
+  }
+  await page.getByRole('button', { name: 'Quitar Producto de mostrador 12', exact: true }).click();
+  await expect(page.locator('.pos-cart-row')).toHaveCount(11);
+});
 test('API privada y permisos actualizados en sesiones abiertas', async ({
   playwright,
   request,

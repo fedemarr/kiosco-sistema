@@ -128,158 +128,166 @@ export function PosScreen({
           </button>
         </div>
         {!!m.scanning && <small>Procesando {m.scanning} código(s)…</small>}
-        {m.search.trim() && (
-          <section className="pos-results card stack" aria-label="Resultados de búsqueda">
-            <div className="row between">
-              <small>{m.loading ? 'Buscando…' : `${m.totalProducts} productos`}</small>
-              <button onClick={() => m.setSearch('')}>Cerrar búsqueda</button>
-            </div>
-            {m.products.map((p) => (
-              <button
-                className="product-tile"
-                key={p.id}
-                disabled={m.busy || (p.trackStock && p.stock <= 0)}
-                onClick={() => m.addProduct(p)}
-              >
-                <span>
-                  <strong>{p.name}</strong>
-                  <small>
-                    {p.barcode} {p.trackStock ? `· Stock ${p.stock}` : ''}
-                  </small>
-                </span>
-                <strong>{money(p.price)}</strong>
-              </button>
-            ))}
-            {!m.loading && !m.products.length && (
-              <p className="muted">No encontramos productos. Probá con otro nombre o código.</p>
-            )}
-            {m.totalProducts > 60 && (
-              <div className="row">
-                <button disabled={m.page === 1} onClick={() => m.setPage(m.page - 1)}>
-                  Anterior
-                </button>
-                <small>Página {m.page}</small>
-                <button
-                  disabled={m.page * 60 >= m.totalProducts}
-                  onClick={() => m.setPage(m.page + 1)}
-                >
-                  Siguiente
-                </button>
+        <div className="pos-body">
+          {m.search.trim() && (
+            <section className="pos-results card stack" aria-label="Resultados de búsqueda">
+              <div className="row between">
+                <small>{m.loading ? 'Buscando…' : `${m.totalProducts} productos`}</small>
+                <button onClick={() => m.setSearch('')}>Cerrar búsqueda</button>
               </div>
-            )}
-          </section>
-        )}
-        {m.custom && (
-          <section className="card stack pos-quick">
-            <div className="row between">
-              <h2>Venta rápida</h2>
-              <button onClick={() => m.setCustom(false)}>Cerrar</button>
-            </div>
-            <div className="row">
-              {m.quick.map((q) => (
+              {m.products.map((p) => (
                 <button
-                  key={q.id}
-                  disabled={m.busy}
-                  onClick={() =>
-                    m.add({ kind: 'quick', key: q.id, quickId: q.id, name: q.name, price: q.price })
-                  }
+                  className="product-tile"
+                  key={p.id}
+                  disabled={m.busy || (p.trackStock && p.stock <= 0)}
+                  onClick={() => m.addProduct(p)}
                 >
-                  {q.emoji} {q.name} · {money(q.price)}
+                  <span>
+                    <strong>{p.name}</strong>
+                    <small>
+                      {p.barcode} {p.trackStock ? `· Stock ${p.stock}` : ''}
+                    </small>
+                  </span>
+                  <strong>{money(p.price)}</strong>
                 </button>
               ))}
-            </div>
-            <form
-              className="fields"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (m.busy) return;
-                const d = new FormData(e.currentTarget);
-                const price = toCents(String(d.get('price')));
-                if (!Number.isInteger(price) || price <= 0) {
-                  m.setError('Ingresá un precio válido.');
-                  return;
-                }
-                m.add({
-                  kind: 'custom',
-                  key: crypto.randomUUID(),
-                  name: String(d.get('name')),
-                  price,
-                });
-                m.setCustom(false);
-              }}
-            >
-              <label>
-                Descripción
-                <input disabled={m.busy} name="name" required minLength={2} maxLength={100} />
-              </label>
-              <label>
-                Precio ($)
-                <input
-                  disabled={m.busy}
-                  name="price"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  required
-                />
-              </label>
-              <button disabled={m.busy} className="primary">
-                Agregar al carrito
-              </button>
-            </form>
-          </section>
-        )}
-        <div className="pos-cart" aria-label="Carrito">
-          {!m.lines.length && (
-            <div className="pos-cart-empty">
-              <ShoppingCart size={46} strokeWidth={1.4} />
-              <p>Escaneá un producto para empezar</p>
-            </div>
+              {!m.loading && !m.products.length && (
+                <p className="muted">No encontramos productos. Probá con otro nombre o código.</p>
+              )}
+              {m.totalProducts > 60 && (
+                <div className="row">
+                  <button disabled={m.page === 1} onClick={() => m.setPage(m.page - 1)}>
+                    Anterior
+                  </button>
+                  <small>Página {m.page}</small>
+                  <button
+                    disabled={m.page * 60 >= m.totalProducts}
+                    onClick={() => m.setPage(m.page + 1)}
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              )}
+            </section>
           )}
-          {m.lines.map((l) => (
-            <div className="pos-cart-row" key={l.key}>
-              <div>
-                <strong>{l.name}</strong>
-                <small>{money(l.price)} por unidad</small>
+          {m.custom && (
+            <section className="card stack pos-quick">
+              <div className="row between">
+                <h2>Venta rápida</h2>
+                <button onClick={() => m.setCustom(false)}>Cerrar</button>
               </div>
-              <div className="quantity row">
-                <button
-                  aria-label={`Restar ${l.name}`}
-                  disabled={m.busy}
-                  onClick={() =>
-                    m.setLines((old) =>
-                      old
-                        .map((i) => (i.key === l.key ? { ...i, quantity: i.quantity - 1 } : i))
-                        .filter((i) => i.quantity > 0),
-                    )
-                  }
-                >
-                  <Minus size={15} />
-                </button>
-                <span>{l.quantity}</span>
-                <button
-                  aria-label={`Sumar ${l.name}`}
-                  disabled={m.busy}
-                  onClick={() =>
-                    m.setLines((old) =>
-                      old.map((i) => (i.key === l.key ? { ...i, quantity: i.quantity + 1 } : i)),
-                    )
-                  }
-                >
-                  <Plus size={15} />
-                </button>
+              <div className="row">
+                {m.quick.map((q) => (
+                  <button
+                    key={q.id}
+                    disabled={m.busy}
+                    onClick={() =>
+                      m.add({
+                        kind: 'quick',
+                        key: q.id,
+                        quickId: q.id,
+                        name: q.name,
+                        price: q.price,
+                      })
+                    }
+                  >
+                    {q.emoji} {q.name} · {money(q.price)}
+                  </button>
+                ))}
               </div>
-              <strong>{money(l.price * l.quantity)}</strong>
-              <button
-                aria-label={`Quitar ${l.name}`}
-                disabled={m.busy}
-                className="danger"
-                onClick={() => m.setLines((old) => old.filter((i) => i.key !== l.key))}
+              <form
+                className="fields"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (m.busy) return;
+                  const d = new FormData(e.currentTarget);
+                  const price = toCents(String(d.get('price')));
+                  if (!Number.isInteger(price) || price <= 0) {
+                    m.setError('Ingresá un precio válido.');
+                    return;
+                  }
+                  m.add({
+                    kind: 'custom',
+                    key: crypto.randomUUID(),
+                    name: String(d.get('name')),
+                    price,
+                  });
+                  m.setCustom(false);
+                }}
               >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
+                <label>
+                  Descripción
+                  <input disabled={m.busy} name="name" required minLength={2} maxLength={100} />
+                </label>
+                <label>
+                  Precio ($)
+                  <input
+                    disabled={m.busy}
+                    name="price"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    required
+                  />
+                </label>
+                <button disabled={m.busy} className="primary">
+                  Agregar al carrito
+                </button>
+              </form>
+            </section>
+          )}
+          <div className="pos-cart" role="region" aria-label="Carrito" tabIndex={0}>
+            {!m.lines.length && (
+              <div className="pos-cart-empty">
+                <ShoppingCart size={46} strokeWidth={1.4} />
+                <p>Escaneá un producto para empezar</p>
+              </div>
+            )}
+            {m.lines.map((l) => (
+              <div className="pos-cart-row" key={l.key}>
+                <div>
+                  <strong>{l.name}</strong>
+                  <small>{money(l.price)} por unidad</small>
+                </div>
+                <div className="quantity row">
+                  <button
+                    aria-label={`Restar ${l.name}`}
+                    disabled={m.busy}
+                    onClick={() =>
+                      m.setLines((old) =>
+                        old
+                          .map((i) => (i.key === l.key ? { ...i, quantity: i.quantity - 1 } : i))
+                          .filter((i) => i.quantity > 0),
+                      )
+                    }
+                  >
+                    <Minus size={15} />
+                  </button>
+                  <span>{l.quantity}</span>
+                  <button
+                    aria-label={`Sumar ${l.name}`}
+                    disabled={m.busy}
+                    onClick={() =>
+                      m.setLines((old) =>
+                        old.map((i) => (i.key === l.key ? { ...i, quantity: i.quantity + 1 } : i)),
+                      )
+                    }
+                  >
+                    <Plus size={15} />
+                  </button>
+                </div>
+                <strong>{money(l.price * l.quantity)}</strong>
+                <button
+                  aria-label={`Quitar ${l.name}`}
+                  disabled={m.busy}
+                  className="danger"
+                  onClick={() => m.setLines((old) => old.filter((i) => i.key !== l.key))}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
         <section className="pos-payment" aria-label="Cobro">
           {m.type === 'EMPLOYEE' && <p className="note">Mi consumo · descuento del 20%</p>}
@@ -360,6 +368,8 @@ export function PosScreen({
               <Moon size={14} /> Tarifa nocturna +10%
             </small>
           )}
+          {m.offlineReady && <small>Sin conexión: cobro pendiente de validación.</small>}
+          {!!m.lines.length && m.online && !m.quoteValid && <small>Actualizando cotización…</small>}
           <div className="row between pos-total">
             <span className="muted">Total</span>
             <strong>{money(m.total)}</strong>
@@ -386,8 +396,6 @@ export function PosScreen({
               ? 'Guardando…'
               : `${m.type === 'OWNER' ? 'Registrar retiro' : 'Cobrar'} ${money(m.total)}`}
           </button>
-          {m.offlineReady && <small>Sin conexión: cobro pendiente de validación.</small>}
-          {!!m.lines.length && m.online && !m.quoteValid && <small>Actualizando cotización…</small>}
         </section>
       </section>
       <aside
