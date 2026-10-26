@@ -34,6 +34,9 @@ export function PosScreen({
   inputRef: (node: HTMLInputElement | null) => void;
 }) {
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const nightRate = m.night && m.type === 'SALE';
+  const surcharge =
+    m.quoteValid && m.quotation ? m.quotation.adjustment : Math.round(m.displaySubtotal * 0.1);
   const collected = Object.values(m.shift?.totals || {}).reduce((s, n) => s + n, 0);
   return (
     <div className="pos-layout">
@@ -97,6 +100,17 @@ export function PosScreen({
           <p className="error" role="alert">
             {m.error}
           </p>
+        )}
+        {nightRate && (
+          <div
+            className="pos-night-banner"
+            role="note"
+            aria-live="polite"
+            aria-label="Tarifa nocturna"
+          >
+            <Moon size={19} aria-hidden="true" />
+            <strong>Tarifa nocturna activa — +10% (22:00 a 06:00)</strong>
+          </div>
         )}
         <div className="pos-searchbar">
           <input
@@ -363,9 +377,10 @@ export function PosScreen({
               )}
             </div>
           )}
-          {m.night && m.type === 'SALE' && (
-            <small className="row">
-              <Moon size={14} /> Tarifa nocturna +10%
+          {nightRate && m.lines.length > 0 && (
+            <small className="row between pos-night-adjustment">
+              <span>Recargo nocturno (10%)</span>
+              <strong>+{money(surcharge)}</strong>
             </small>
           )}
           {m.offlineReady && <small>Sin conexión: cobro pendiente de validación.</small>}
@@ -375,7 +390,7 @@ export function PosScreen({
             <strong>{money(m.total)}</strong>
           </div>
           <button
-            className="pos-charge"
+            className={`pos-charge${nightRate ? ' pos-charge-night' : ''}`}
             aria-label={m.type === 'OWNER' ? 'Registrar retiro' : 'Confirmar cobro'}
             disabled={
               m.busy ||
@@ -395,6 +410,7 @@ export function PosScreen({
             {m.busy
               ? 'Guardando…'
               : `${m.type === 'OWNER' ? 'Registrar retiro' : 'Cobrar'} ${money(m.total)}`}
+            {nightRate && <Moon size={19} aria-hidden="true" />}
           </button>
         </section>
       </section>

@@ -1,5 +1,11 @@
 # Progreso · 24/10/2026
 
+## Tarifa nocturna visible · 26/10/2026
+- Franja ámbar con luna sobre el buscador: “Tarifa nocturna activa — +10% (22:00 a 06:00)”. Botón Cobrar ámbar con luna y desglose del importe del recargo en ventas. Estilo basado en la captura del sistema anterior.
+- Se conserva el cálculo existente: +10% en ventas entre 22:00 inclusive y 06:00 exclusive de Buenos Aires, para todos los medios de pago; consumos y retiros conservan sus reglas. No se aplica el recargo dos veces.
+- Ajustes compactos en celular para mantener el carrito accesible también con aviso nocturno y pago mixto. Cache offline v8.
+- Build, lint, 38 pruebas de lógica/PostgreSQL y 10 pruebas E2E aprobados. Prueba de navegador con reloj controlado verifica aparición a las 22:00 y desaparición a las 06:00, sin recargar. Capturas de escritorio y celular revisadas. Sin cambios en datos de producción.
+
 ## Ajuste de carrito POS · 26/10/2026
 - Panel limitado al alto de la ventana; buscador y cobro fuera del scroll, cuerpo flexible con min-height: 0 y lista con scroll vertical propio. Búsqueda y venta rápida usan el cuerpo disponible al abrirse.
 - Filas más compactas, controles táctiles de 44 × 44 px, avisos acotados con scroll para conservar espacio sin conexión. Los avisos de cotización quedan antes del total para evitar que muevan el botón Cobrar.

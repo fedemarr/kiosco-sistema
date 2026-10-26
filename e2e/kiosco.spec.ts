@@ -67,6 +67,27 @@ test.afterAll(async () => {
   });
   await db.$disconnect();
 });
+test('aviso y cobro nocturnos cambian a las 22 y a las 06 de Buenos Aires', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-26T00:59:58Z') });
+  await page.clock.pauseAt(new Date('2026-10-26T00:59:59Z'));
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  const banner = page.getByRole('note', { name: 'Tarifa nocturna', exact: true });
+  const charge = page.getByRole('button', { name: 'Confirmar cobro' });
+  await page.clock.runFor(200);
+  await expect(banner).toHaveCount(0);
+  await page.clock.runFor(1000);
+  await expect(banner).toContainText('Tarifa nocturna activa — +10% (22:00 a 06:00)');
+  await expect(charge).toHaveClass(/pos-charge-night/);
+  await page.screenshot({ path: `.screenshots/tarifa-nocturna-${page.viewportSize()!.width}.png` });
+  await page.clock.setSystemTime(new Date('2026-10-26T09:00:00Z'));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(banner).toHaveCount(0);
+  await expect(charge).not.toHaveClass(/pos-charge-night/);
+});
 test('carrito largo con scroll interno y cobro visible', async ({ page }, testInfo) => {
   await page.goto('/login');
   await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
@@ -93,6 +114,7 @@ test('carrito largo con scroll interno y cobro visible', async ({ page }, testIn
     await page.setViewportSize(size);
     for (const method of ['Efectivo', 'Mixto', 'Mercado Pago']) {
       await page.getByRole('radio', { name: method, exact: true }).click();
+      await expect(page.getByText('Actualizando cotización…', { exact: true })).toHaveCount(0);
       await expect
         .poll(() =>
           cart.evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight > 70),
@@ -119,6 +141,7 @@ test('carrito largo con scroll interno y cobro visible', async ({ page }, testIn
       await page
         .getByRole('button', { name: 'Restar Producto de mostrador 12', exact: true })
         .click();
+      await expect(page.getByText('Actualizando cotización…', { exact: true })).toHaveCount(0);
       await expect
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
         .toBe(true);

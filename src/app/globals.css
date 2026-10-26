@@ -546,6 +546,26 @@ dialog::backdrop {
   border-color: var(--accent);
   color: white;
 }
+.pos-night-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  min-height: 52px;
+  padding: 10px 20px;
+  margin-bottom: 14px;
+  border: 1px solid #85430d;
+  border-radius: 14px;
+  background: #321b12;
+  color: #fbbf24;
+  font-size: 16px;
+}
+.pos-night-banner svg {
+  flex-shrink: 0;
+}
+.pos-night-adjustment {
+  color: #fbbf24;
+}
 .pos-searchbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 50px;
@@ -727,6 +747,13 @@ dialog::backdrop {
 }
 .pos-charge:disabled {
   cursor: not-allowed;
+}
+.pos-charge-night {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #b76a12;
 }
 .pos-payment-fields {
   display: flex;
@@ -1435,7 +1462,16 @@ dialog::backdrop {
   }
   .pos-header {
     align-items: start;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
+  }
+  .pos-header > div:first-child {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  .pos-header > div:first-child > small {
+    font-size: 12px;
   }
   .pos-actions {
     width: 100%;
@@ -1449,6 +1485,14 @@ dialog::backdrop {
     font-size: 15px;
     padding: 10px;
   }
+  .pos-night-banner {
+    min-height: 44px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    line-height: 1.35;
+    gap: 8px;
+  }
   .pos-cart-empty {
     min-height: 0;
   }
@@ -1457,14 +1501,14 @@ dialog::backdrop {
   }
   .pos-payment {
     padding: 12px;
-    gap: 12px;
+    gap: 8px;
     border-radius: 16px;
   }
   .pos-methods {
     gap: 6px;
   }
   .pos-methods button {
-    min-height: 48px;
+    min-height: 44px;
     font-size: 11px;
     padding: 6px 2px;
     border-radius: 12px;
@@ -1495,7 +1539,8 @@ dialog::backdrop {
     grid-row: 2;
   }
   .pos-turn {
-    margin: 14px 0 0;
+    margin: 8px 0 0;
+    padding-bottom: 0;
   }
   .pos-payment-fields {
     gap: 10px;
