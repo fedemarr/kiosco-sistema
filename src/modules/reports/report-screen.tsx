@@ -82,8 +82,13 @@ export function ReportScreen() {
   const [tab, setTab] = useState('shifts');
   const [shiftFilter, setShiftFilter] = useState('');
   const [rangeStart, setRangeStart] = useState('');
-  const rangeEnabled = tab === 'shifts' || tab === 'employees';
+  const rangeEnabled = tab !== 'stock' && tab !== 'alerts';
+  const [rangeError, setRangeError] = useState('');
   const from = rangeEnabled && rangeStart ? rangeStart : tab === 'week' ? moveDate(date, -6) : date;
+  const periodDays = Math.max(
+    1,
+    Math.min(93, Math.round((new Date(date).getTime() - new Date(from).getTime()) / 86400000) + 1),
+  );
   const remote = useRemote<Report>(`reports?from=${from}&to=${date}`, 2000);
   const d = remote.data;
   const shifts = d?.shifts.filter((s) => !shiftFilter || s.type === shiftFilter) || [];
@@ -114,6 +119,57 @@ export function ReportScreen() {
         </nav>
       </header>
       <div className="owner-content">
+        {rangeEnabled && (
+          <form
+            className="report-card report-range"
+            key={`${from}:${date}`}
+            aria-label="Rango de fechas"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const values = new FormData(e.currentTarget);
+              const start = String(values.get('from'));
+              const end = String(values.get('to'));
+              if (
+                start > end ||
+                (new Date(end).getTime() - new Date(start).getTime()) / 86400000 > 92
+              ) {
+                setRangeError('Elegí fechas en orden, hasta 93 días por consulta.');
+                return;
+              }
+              setRangeError('');
+              setRangeStart(start);
+              setDate(end);
+            }}
+          >
+            <div className="fields">
+              <label>
+                Desde
+                <input type="date" name="from" required defaultValue={from} max={businessDate()} />
+              </label>
+              <label>
+                Hasta
+                <input type="date" name="to" required defaultValue={date} max={businessDate()} />
+              </label>
+              <button className="primary">Aplicar rango</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRangeStart('');
+                  setDate(null);
+                  setRangeError('');
+                }}
+              >
+                Ver día actual
+              </button>
+            </div>
+            <small>Hasta 93 días por consulta. Día operativo: 06:00 a 06:00.</small>
+            {rangeError && (
+              <p className="error" role="alert">
+                {rangeError}
+              </p>
+            )}
+          </form>
+        )}
         <div className="row between report-live" aria-label="Estado de actualización de reportes">
           <small>
             {remote.error
@@ -123,7 +179,7 @@ export function ReportScreen() {
               ` · Última consulta ${new Date(remote.updatedAt).toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}`}
             {' · Día operativo: 06:00 a 06:00'}
           </small>
-          {selectedDate !== null && (
+          {selectedDate !== null && !rangeEnabled && (
             <button
               onClick={() => {
                 setDate(null);
@@ -305,13 +361,19 @@ export function ReportScreen() {
                 </div>
                 {tab === 'week' && (
                   <section className="report-card week-chart">
-                    <h2>Ventas de la semana</h2>
+                    <h2>{periodDays === 7 ? 'Ventas de la semana' : 'Ventas del período'}</h2>
                     <p className="muted">
-                      Proyección a 30 días: {money(Math.round((d.total / 7) * 30))}. Estimación
-                      según el promedio de estos siete días.
+                      Proyección a 30 días: {money(Math.round((d.total / periodDays) * 30))}.
+                      Estimación según el promedio de los {periodDays} días del período.
                     </p>
-                    <div className="week-bars">
-                      {Array.from({ length: 7 }, (_, i) => {
+                    <div
+                      className="week-bars"
+                      style={{
+                        gridTemplateColumns: `repeat(${periodDays}, minmax(64px, 1fr))`,
+                        overflowX: 'auto',
+                      }}
+                    >
+                      {Array.from({ length: periodDays }, (_, i) => {
                         const day = moveDate(from, i);
                         const value = d.days.find((v) => v.day === day);
                         const max = Math.max(1, ...d.days.map((v) => v.total));
@@ -369,37 +431,6 @@ export function ReportScreen() {
               <ReportStock products={d.lowStock} count={d.lowStockCount} refresh={remote.refresh} />
             )}
             {tab === 'alerts' && <ReportAlerts />}
-            {rangeEnabled && (
-              <details className="report-card" style={{ marginTop: 20 }}>
-                <summary>Elegir rango de fechas</summary>
-                <div className="fields" style={{ marginTop: 16 }}>
-                  <label>
-                    Desde
-                    <input
-                      type="date"
-                      value={rangeStart || date}
-                      max={date}
-                      onChange={(e) => setRangeStart(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Hasta
-                    <input
-                      type="date"
-                      value={date}
-                      min={rangeStart || undefined}
-                      onChange={(e) => {
-                        if (e.target.value) setDate(e.target.value);
-                      }}
-                    />
-                  </label>
-                </div>
-                <button style={{ marginTop: 12 }} onClick={() => setRangeStart('')}>
-                  Ver un solo día
-                </button>
-                <small> Hasta 93 días por consulta.</small>
-              </details>
-            )}
             {tab !== 'alerts' && tab !== 'stock' && (
               <a
                 className="report-export row"

@@ -1,5 +1,14 @@
 # Progreso · 24/10/2026
 
+## Operativa POS, ingresos y reportes · 27/10/2026
+- Turnos: orden explícito de más reciente a más antiguo con fecha/hora y desempate por ID. Se quitó el corte de 100 operaciones del turno actual. Total vendido completo, cobrado y desglose por efectivo/MP/tarjeta; detalle común con ítems, cantidades, subtotales, recargos/descuentos y pagos. En celular el resumen se amplía sobre Caja para poder consultar operaciones.
+- Búsqueda por tokens parciales independientes, sin importar orden ni mayúsculas, en catálogo, Stock y catálogo offline. Mantiene lectura por código y escape literal de comodines SQL. No implementa corrección automática de errores ortográficos.
+- Efectivo: con recibido vacío se ofrece “Cobrar justo” en un clic y se envía recibido igual al total cotizado; con importe explícito se valida el vuelto. Conserva persistencia previa del cobro, clave idempotente y validación de precio/stock. Errores de stock detallan producto, solicitado y disponible; la validación se aplica a todos los medios.
+- Stock: historial de los últimos 30 ingresos confirmados del usuario, con fecha/hora, cantidad y antes/después. Se consulta desde Kardex con permisos vigentes y se conserva tras recargas; cargas pendientes no se presentan como confirmadas ni crean filas duplicadas.
+- Reportes: formulario Desde/Hasta visible arriba, aplicable a turnos, resumen, empleados y gráfico. Hasta 93 días por consulta, sin mínimo histórico. Fechas inválidas rechazadas, se elimina el recorte de 1.000 turnos y se muestran todos los días del rango en el gráfico, con proyección calculada sobre el período real. Mantiene día operativo y refresco automático.
+- Sin cambios de esquema ni migraciones de datos. No se modifican ventas, stock ni turnos reales durante las pruebas. Cache offline v11.
+- Validación: TypeScript, lint y build de producción correctos; 50 pruebas de lógica/PostgreSQL y 16 E2E aprobadas. Flujo nuevo verificado en 390 px y escritorio: búsqueda inversa, dos ingresos visibles tras recargar, cobro exacto con recibido igual al pago, detalle/total de turno, stock insuficiente y rango de ocho días sin cortar el gráfico. Capturas del detalle de turno revisadas.
+
 ## Reportes automáticos y día operativo · 26/10/2026
 - Investigación de solo lectura en Supabase: las 4 ventas iniciales de Yoel, por $14.190, estaban guardadas en su turno NIGHT del día operativo 25/10 aunque una se registró después de medianoche del 26/10. No se alteraron ventas ni turnos reales.
 - El reporte abre por defecto el día operativo actual (06:00 a 06:00 de Buenos Aires), igual en API y pantalla. Avanza automáticamente a las 06:00; una fecha elegida manualmente se conserva, con opción “Ver día actual”.

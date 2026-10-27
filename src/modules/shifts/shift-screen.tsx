@@ -6,6 +6,7 @@ import { request, errorMessage } from '@/lib/client';
 import { dateTime, money, toCents } from '@/lib/format';
 import { shiftNames, paymentNames, type Shift } from '@/lib/types';
 import { soldItems } from '@/modules/sales/summary';
+import { OperationDetail } from '@/modules/sales/operation-detail';
 export function ShiftScreen() {
   const remote = useRemote<Shift>('shifts/current');
   const [busy, setBusy] = useState(false);
@@ -117,6 +118,17 @@ export function ShiftScreen() {
             <span className="pill">● En curso</span>
           </div>
           <div className="grid stats">
+            <div className="card">
+              <p className="muted">Total vendido en el turno</p>
+              <strong className="stat-value">
+                {money(
+                  shift.saleTotal ??
+                    shift.operations
+                      .filter((o) => o.type === 'SALE')
+                      .reduce((sum, o) => sum + o.total, 0),
+                )}
+              </strong>
+            </div>
             {Object.entries(payments).map(([method, amount]) => (
               <div className="card" key={method}>
                 <p className="muted">{paymentNames[method as keyof typeof payments]}</p>
@@ -130,7 +142,9 @@ export function ShiftScreen() {
           </div>
           <details className="card" open>
             <summary>
-              <strong>Este turno · últimas {shift.operations.length} operaciones</strong>
+              <strong>
+                Este turno · {shift.operations.length} operaciones · más recientes primero
+              </strong>
             </summary>
             {shift.operations.map((o) => (
               <div className="cart-line" key={o.id}>
@@ -149,9 +163,7 @@ export function ShiftScreen() {
                     .map((p) => `${paymentNames[p.method]} ${money(p.amount)}`)
                     .join(' + ')}
                 </small>
-                <p className="muted" style={{ marginBottom: 0 }}>
-                  {o.items.map((i) => `${i.quantity} × ${i.name}`).join(', ')}
-                </p>
+                <OperationDetail operation={o} />
               </div>
             ))}
             {!shift.operations.length && (

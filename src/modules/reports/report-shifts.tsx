@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { dateTime, money } from '@/lib/format';
 import { shiftNames, type Shift } from '@/lib/types';
 import { request, errorMessage } from '@/lib/client';
+import { OperationDetail } from '@/modules/sales/operation-detail';
 export function ReportShifts({
   shifts,
   refresh,
@@ -98,6 +99,14 @@ export function ReportShifts({
                   todos los movimientos necesarios para conciliar la caja anterior.
                 </p>
               )}
+              <p className="muted">
+                Más recientes primero · Total vendido:{' '}
+                {money(
+                  s.operations
+                    .filter((o) => o.type === 'SALE')
+                    .reduce((sum, o) => sum + o.total, 0),
+                )}
+              </p>
               {s.operations.map((o) => (
                 <div className="cart-line" key={o.id}>
                   <div className="row between">
@@ -137,7 +146,10 @@ export function ReportShifts({
                   {!!o.unallocatedPayment && (
                     <p className="muted">Mixto sin desglose: {money(o.unallocatedPayment)}</p>
                   )}
-                  <p>{o.items.map((i) => `${i.quantity} × ${i.name}`).join(', ')}</p>
+                  <details>
+                    <summary>Ver detalle de venta</summary>
+                    <OperationDetail operation={o} />
+                  </details>
                 </div>
               ))}
               {!s.operations.length && <p className="muted">Sin movimientos.</p>}

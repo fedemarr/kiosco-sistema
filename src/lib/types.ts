@@ -34,11 +34,12 @@ export type Operation = {
   adjustment: number;
   createdAt: string;
   payments: Payment[];
-  items: { name: string; quantity: number; subtotal: number }[];
+  items: { name: string; quantity: number; subtotal: number; unitCost?: number }[];
 };
 export type Shift = {
   archived?: boolean;
   saleCount?: number;
+  saleTotal?: number;
   offlineToken?: string;
   totals?: { CASH: number; MP: number; CARD: number };
   id: string;

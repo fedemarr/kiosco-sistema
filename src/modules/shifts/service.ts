@@ -12,24 +12,23 @@ export async function currentShift(userId: string) {
     include: {
       operations: {
         where: { voidedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: { payments: true, items: true },
       },
     },
   });
   if (!shift) return null;
-  const grouped = await db.payment.groupBy({
-    by: ['method'],
-    where: { operation: { shiftId: shift.id, voidedAt: null } },
-    _sum: { amount: true },
-  });
   const totals = { CASH: 0, MP: 0, CARD: 0 };
-  for (const p of grouped) totals[p.method] = p._sum.amount || 0;
-  const saleCount = await db.operation.count({
-    where: { shiftId: shift.id, voidedAt: null, type: 'SALE' },
-  });
-  return { ...shift, totals, saleCount, offlineToken: await offlinePermit(userId, shift.id) };
+  for (const payment of shift.operations.flatMap((operation) => operation.payments))
+    totals[payment.method] += payment.amount;
+  const sales = shift.operations.filter((o) => o.type === 'SALE');
+  return {
+    ...shift,
+    totals,
+    saleCount: sales.length,
+    saleTotal: sales.reduce((sum, o) => sum + o.total, 0),
+    offlineToken: await offlinePermit(userId, shift.id),
+  };
 }
 export async function openShift(userId: string, body: unknown) {
   const input = z
@@ -53,7 +52,11 @@ export async function closeShift(userId: string, body: unknown) {
     const shift = await tx.shift.findFirst({
       where: { userId, closedAt: null, archived: false },
       include: {
-        operations: { where: { voidedAt: null }, include: { payments: true, items: true } },
+        operations: {
+          where: { voidedAt: null },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          include: { payments: true, items: true },
+        },
       },
     });
     if (!shift) throw new AppError('No tenés un turno abierto.', 409);

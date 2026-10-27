@@ -833,6 +833,37 @@ dialog::backdrop {
   flex: 1;
   overflow: auto;
 }
+.pos-turn-totals {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.operation-detail {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.operation-detail .row {
+  align-items: start;
+  flex-wrap: nowrap;
+}
+.operation-detail strong {
+  white-space: nowrap;
+}
+.stock-receipts {
+  margin-bottom: 16px;
+}
+.stock-receipts .table-scroll {
+  max-height: 260px;
+  overflow: auto;
+}
+.stock-receipts th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
 .pos-sale {
   border-bottom: 1px solid var(--line);
   padding: 14px 0;
@@ -911,6 +942,12 @@ dialog::backdrop {
 }
 .report-live {
   margin-bottom: 14px;
+}
+.report-range {
+  margin-bottom: 14px;
+}
+.report-range .fields {
+  align-items: end;
 }
 .report-date {
   height: 56px;
@@ -1407,6 +1444,17 @@ dialog::backdrop {
     padding: 0 14px 10px;
     max-height: 25dvh;
   }
+  .pos-turn.expanded {
+    position: fixed;
+    left: 208px;
+    right: 16px;
+    bottom: 16px;
+    height: 65dvh;
+    max-height: 65dvh;
+    z-index: 15;
+    margin: 0;
+    box-shadow: 0 0 0 100vmax #0006;
+  }
   .pos-turn-heading svg {
     display: block;
   }
@@ -1574,6 +1622,11 @@ dialog::backdrop {
   .pos-turn {
     margin: 8px 0 0;
     padding-bottom: 0;
+  }
+  .pos-turn.expanded {
+    left: 12px;
+    right: 12px;
+    bottom: 76px;
   }
   .pos-payment-fields {
     gap: 10px;

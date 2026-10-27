@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { db } from '@/lib/db';
 import { quote, checkout, voidOperation } from '@/modules/sales/service';
-import { adjustStock, saveProduct, mergeProducts } from '@/modules/stock/service';
+import { adjustStock, saveProduct, mergeProducts, listProducts } from '@/modules/stock/service';
+import { report, reportRange } from '@/modules/reports/service';
 import { syncCheckout } from '@/modules/offline/service';
 import { importWorkbook, exportWorkbook } from '@/modules/stock/excel';
 import ExcelJS from 'exceljs';
@@ -397,5 +398,80 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
       }),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
     expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(3);
+  });
+  it('busca palabras en cualquier orden en el catálogo y conserva búsqueda por código', async () => {
+    const p = await product(3);
+    await db.product.update({
+      where: { id: p.id },
+      data: { name: `Galletitas Placer Pera ${tag}` },
+    });
+    for (const query of [`pera placer ${tag}`, `PLACER ${tag}`, p.barcode]) {
+      const found = await listProducts(
+        new URL(`https://test/api/catalog?q=${encodeURIComponent(query)}`),
+      );
+      expect(found.products.map((row) => row.id)).toContain(p.id);
+    }
+    const empty = await listProducts(
+      new URL(`https://test/api/catalog?q=${encodeURIComponent(`${tag} chocolate`)}`),
+    );
+    expect(empty.total).toBe(0);
+  });
+  it.each(['CASH', 'MP', 'CARD'] as const)(
+    'impide cobrar con %s si el stock se agota después de cotizar',
+    async (method) => {
+      const p = await product(1);
+      const input = await payload(owner, p.id);
+      const amount = input.payments[0].amount;
+      await adjustStock(owner.id, p.id, {
+        type: 'COUNT',
+        quantity: 0,
+        note: 'Conteo de prueba',
+        expectedStock: 1,
+      });
+      await expect(
+        checkout(owner, {
+          ...input,
+          payments: [{ method, amount }],
+          ...(method === 'CASH' ? { received: amount } : {}),
+        }),
+      ).rejects.toMatchObject({
+        code: 'INSUFFICIENT_STOCK',
+        details: { productId: p.id, available: 0, requested: 1 },
+      });
+      expect(await db.idempotency.findUnique({ where: { key: input.idempotencyKey } })).toBeNull();
+    },
+  );
+  it('el turno conserva más de 100 ventas, orden explícito y totales completos', async () => {
+    const user = await db.user.create({
+      data: { name: 'Turno extenso', username: `long-${tag}`, passwordHash: 'not-a-login' },
+    });
+    users.push(user.id);
+    const shift = await db.shift.create({
+      data: { userId: user.id, type: 'MORNING', openingCash: 0, businessDate: '2026-10-16' },
+    });
+    await db.operation.createMany({
+      data: Array.from({ length: 105 }, (_, index) => ({
+        userId: user.id,
+        shiftId: shift.id,
+        type: 'SALE' as const,
+        subtotal: 100,
+        total: 100,
+        adjustment: 0,
+        cost: 0,
+        createdAt: new Date(Date.UTC(2026, 9, 16, 12, index)),
+      })),
+    });
+    const current = await currentShift(user.id);
+    expect(current).toMatchObject({ saleCount: 105, saleTotal: 10500 });
+    expect(current!.operations).toHaveLength(105);
+    expect(current!.operations[0].createdAt.getTime()).toBeGreaterThan(
+      current!.operations[104].createdAt.getTime(),
+    );
+    const result = await report(new URL('https://test/api/reports?from=2026-10-15&to=2026-10-17'));
+    expect(result.shifts.find((s) => s.id === shift.id)?.operations).toHaveLength(105);
+    expect(result.saleTotal).toBeGreaterThanOrEqual(10500);
+    expect(() =>
+      reportRange(new URL('https://test/api/reports?from=2026-02-30&to=2026-03-01')),
+    ).toThrow();
   });
 });

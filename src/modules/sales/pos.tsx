@@ -8,6 +8,7 @@ import type { CartInput, CheckoutInput } from './schema';
 import { useUser } from '@/components/app-shell';
 import { enqueue, removePendingSale } from '@/modules/offline/queue';
 import { cacheCatalog, readSnapshot, saveSnapshot, warmCatalog } from '@/modules/offline/catalog';
+import { matchesProduct } from '@/lib/product-search';
 type Line = {
   key: string;
   name: string;
@@ -150,13 +151,8 @@ function usePos() {
         const snapshot = await readSnapshot(user.id);
         if (!snapshot)
           throw new ApiError('No hay catálogo guardado. Conectate para prepararlo.', 'NETWORK');
-        const q = search.toLocaleLowerCase();
         const matched = snapshot.products.filter(
-          (p) =>
-            (!q ||
-              p.name.toLocaleLowerCase().includes(q) ||
-              p.barcode.toLocaleLowerCase().includes(q)) &&
-            (!category || p.categoryId === category),
+          (p) => matchesProduct(p, search) && (!category || p.categoryId === category),
         );
         return { products: matched.slice((page - 1) * 60, page * 60), total: matched.length, page };
       };
@@ -207,8 +203,10 @@ function usePos() {
           }
         })
         .catch((e) => {
-          if (!cancelled && !(e instanceof ApiError && e.code === 'NETWORK'))
+          if (!cancelled && !(e instanceof ApiError && e.code === 'NETWORK')) {
+            setQuotation(null);
             setError(errorMessage(e));
+          }
         });
     };
     const timer = setTimeout(getQuote, 150);
@@ -250,13 +248,15 @@ function usePos() {
   const cashAmount =
     type === 'OWNER' ? 0 : method === 'MIXED' ? toCents(cash) : method === 'CASH' ? total : 0;
   const change = toCents(received || '0') - cashAmount;
-  async function charge() {
+  async function charge(exactCash = false) {
     if (chargeLock.current || scanCount.current > 0 || (!quoteValid && !offlineReady) || !shift)
       return;
     chargeLock.current = true;
     setBusy(true);
     setError('');
     setMessage('');
+    const receivedAmount = exactCash && method === 'CASH' ? total : toCents(received || '0');
+    const paymentChange = receivedAmount - cashAmount;
     const payments: Payment[] =
       type === 'OWNER'
         ? []
@@ -268,7 +268,7 @@ function usePos() {
           : [{ method: method as Payment['method'], amount: total }];
     if (
       payments.some((p) => !Number.isInteger(p.amount) || p.amount < 0) ||
-      (cashAmount > 0 && (!Number.isFinite(change) || change < 0))
+      (cashAmount > 0 && (!Number.isFinite(paymentChange) || paymentChange < 0))
     ) {
       setError('Revisá los importes: el efectivo recibido debe alcanzar.');
       setBusy(false);
@@ -283,7 +283,7 @@ function usePos() {
         ? { offline: true, offlineToken: shift.offlineToken, expectedTotal: total }
         : { quoteToken: quotation!.quoteToken }),
       payments,
-      ...(cashAmount > 0 ? { received: toCents(received) } : {}),
+      ...(cashAmount > 0 ? { received: receivedAmount } : {}),
     };
     try {
       // Guardar la clave antes de enviar: una recarga o respuesta perdida conserva el mismo cobro.
@@ -368,11 +368,7 @@ function usePos() {
     try {
       const candidates = online
         ? (await request<ProductList>('catalog?q=' + encodeURIComponent(query))).products
-        : ((await readSnapshot(user.id))?.products || []).filter(
-            (p) =>
-              p.name.toLowerCase().includes(query.toLowerCase()) ||
-              p.barcode.toLowerCase().includes(query.toLowerCase()),
-          );
+        : ((await readSnapshot(user.id))?.products || []).filter((p) => matchesProduct(p, query));
       const p =
         candidates.find((p) => p.barcode.toLowerCase() === query.toLowerCase()) ||
         (candidates.length === 1 ? candidates[0] : undefined);

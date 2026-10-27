@@ -5,6 +5,7 @@ import { AppError } from '@/lib/errors';
 import { transaction } from '@/lib/transaction';
 import { audit } from '@/lib/audit';
 import { Prisma, type MovementType } from '@/generated/prisma/client';
+import { searchTokens, escapeLike } from '@/lib/product-search';
 export const cents = z.number().int().min(0).max(100_000_000);
 export const productSchema = z
   .object({
@@ -55,19 +56,17 @@ export async function moveStock(
   });
 }
 export async function listProducts(url: URL, includeStock = false) {
-  const q = (url.searchParams.get('q') || '').slice(0, 100);
+  const tokens = searchTokens(url.searchParams.get('q') || '');
   const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
   const where: Prisma.ProductWhereInput = {
     deletedAt: null,
     ...(!includeStock ? { sellable: true } : {}),
-    ...(q
-      ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { barcode: { contains: q, mode: 'insensitive' } },
-          ],
-        }
-      : {}),
+    AND: tokens.map((token) => ({
+      OR: [
+        { name: { contains: escapeLike(token), mode: 'insensitive' } },
+        { barcode: { contains: escapeLike(token), mode: 'insensitive' } },
+      ],
+    })),
     ...(url.searchParams.get('category')
       ? { categoryId: z.uuid().parse(url.searchParams.get('category')) }
       : {}),

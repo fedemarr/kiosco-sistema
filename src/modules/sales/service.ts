@@ -30,7 +30,17 @@ export async function priceCart(tx: Prisma.TransactionClient, input: CartInput, 
         );
       grouped.set(p.id, (grouped.get(p.id) || 0) + item.quantity);
       if (p.trackStock && p.stock < grouped.get(p.id)!)
-        throw new AppError(`No hay stock suficiente de ${p.name}.`, 409, 'INSUFFICIENT_STOCK');
+        throw new AppError(
+          `Stock insuficiente de ${p.name}: pedís ${grouped.get(p.id)}, quedan ${p.stock}. Revisá la cantidad antes de cobrar.`,
+          409,
+          'INSUFFICIENT_STOCK',
+          {
+            productId: p.id,
+            productName: p.name,
+            available: p.stock,
+            requested: grouped.get(p.id),
+          },
+        );
       items.push({
         productId: p.id,
         name: p.name,

@@ -14,7 +14,8 @@ import {
   Moon,
   ChevronDown,
 } from 'lucide-react';
-import { money, toCents } from '@/lib/format';
+import { money, toCents, dateTime } from '@/lib/format';
+import { OperationDetail } from './operation-detail';
 import { shiftNames, paymentNames } from '@/lib/types';
 import { can } from '@/modules/auth/permissions';
 import type { PosModel } from './pos';
@@ -38,6 +39,11 @@ export function PosScreen({
   const surcharge =
     m.quoteValid && m.quotation ? m.quotation.adjustment : Math.round(m.displaySubtotal * 0.1);
   const collected = Object.values(m.shift?.totals || {}).reduce((s, n) => s + n, 0);
+  const exactCash = m.method === 'CASH' && !m.received.trim();
+  const saleTotal =
+    m.shift?.saleTotal ??
+    m.shift?.operations.filter((o) => o.type === 'SALE').reduce((sum, o) => sum + o.total, 0) ??
+    0;
   return (
     <div className="pos-layout">
       <section className="pos-workspace" aria-label="Caja">
@@ -366,12 +372,14 @@ export function PosScreen({
                       aria-label="Efectivo recibido ($)"
                       disabled={m.busy}
                       onChange={(e) => m.setReceived(e.target.value)}
-                      placeholder="0"
+                      placeholder="Opcional: pago exacto"
                     />
                   </label>
                   <div className="row between">
-                    <span className="muted">{m.change >= 0 ? 'Vuelto' : 'Falta'}</span>
-                    <strong>{money(Math.abs(m.change))}</strong>
+                    <span className="muted">
+                      {exactCash ? 'Pago exacto' : m.change >= 0 ? 'Vuelto' : 'Falta'}
+                    </span>
+                    <strong>{money(exactCash ? 0 : Math.abs(m.change))}</strong>
                   </div>
                 </>
               )}
@@ -401,15 +409,17 @@ export function PosScreen({
                 (!Number.isFinite(m.cashAmount) ||
                   m.cashAmount < 0 ||
                   m.cashAmount > m.total ||
-                  (m.cashAmount > 0 && (!Number.isFinite(m.change) || m.change < 0)))) ||
+                  (m.cashAmount > 0 &&
+                    !exactCash &&
+                    (!Number.isFinite(m.change) || m.change < 0)))) ||
               (!m.quoteValid && !m.offlineReady) ||
               (m.type === 'OWNER' && !m.note.trim())
             }
-            onClick={() => void m.charge()}
+            onClick={() => void m.charge(exactCash)}
           >
             {m.busy
               ? 'Guardando…'
-              : `${m.type === 'OWNER' ? 'Registrar retiro' : 'Cobrar'} ${money(m.total)}`}
+              : `${m.type === 'OWNER' ? 'Registrar retiro' : exactCash ? 'Cobrar justo' : 'Cobrar'} ${money(m.total)}`}
             {nightRate && <Moon size={19} aria-hidden="true" />}
           </button>
         </section>
@@ -428,6 +438,19 @@ export function PosScreen({
           <ChevronDown size={16} />
         </button>
         <div className="pos-turn-body">
+          <div className="pos-turn-totals" aria-label="Totales del turno">
+            <div className="row between">
+              <strong>Total vendido</strong>
+              <strong>{money(saleTotal)}</strong>
+            </div>
+            {(['CASH', 'MP', 'CARD'] as const).map((method) => (
+              <div className="row between" key={method}>
+                <span>{paymentNames[method]}</span>
+                <strong>{money(m.shift?.totals?.[method] || 0)}</strong>
+              </div>
+            ))}
+            <small>Más recientes primero · cobrado {money(collected)}, incluye consumos.</small>
+          </div>
           <div className="pos-turn-sales">
             {!m.shift?.operations.length && <p className="empty">Sin ventas aún</p>}
             {m.shift?.operations.map((o) => (
@@ -442,17 +465,13 @@ export function PosScreen({
                           : 'Venta'}
                     </strong>
                     <small>
-                      {new Date(o.createdAt).toLocaleTimeString('es-AR', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        timeZone: 'America/Argentina/Buenos_Aires',
-                      })}{' '}
-                      · {o.payments.map((p) => paymentNames[p.method]).join(' + ')}
+                      {dateTime(o.createdAt)} ·{' '}
+                      {o.payments.map((p) => paymentNames[p.method]).join(' + ')}
                     </small>
                   </span>
                   <strong>{money(o.total)}</strong>
                 </summary>
-                <p>{o.items.map((i) => `${i.quantity} × ${i.name}`).join(', ')}</p>
+                <OperationDetail operation={o} />
               </details>
             ))}
           </div>

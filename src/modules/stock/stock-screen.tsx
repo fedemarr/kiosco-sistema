@@ -48,6 +48,16 @@ export function StockScreen() {
     access ? `products?q=${encodeURIComponent(search)}&page=${page}` : null,
   );
   const categories = useRemote<Category[]>(access ? 'categories' : null);
+  const receipts = useRemote<
+    {
+      id: string;
+      quantity: number;
+      before: number;
+      after: number;
+      createdAt: string;
+      product: { name: string; barcode: string };
+    }[]
+  >(access ? 'stock-receipts' : null, 2000);
   function open(value: Modal) {
     setModal(value);
     setTimeout(() => dialog.current?.showModal(), 0);
@@ -63,7 +73,7 @@ export function StockScreen() {
       await fn();
       setMessage(success);
       close();
-      await list.refresh();
+      await Promise.all([list.refresh(), receipts.refresh()]);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -180,6 +190,48 @@ export function StockScreen() {
         <small>{list.data?.total || 0} productos activos</small>
         <small>Actualización cada 15 segundos</small>
       </div>
+      <section className="card stock-receipts" aria-label="Ingresos recientes de stock">
+        <h2>Ingresos recientes confirmados</h2>
+        <p className="muted">
+          Tus últimos 30 ingresos. Se conservan al recargar; una carga pendiente aparece cuando se
+          confirma.
+        </p>
+        {receipts.error && (
+          <p className="error" role="alert">
+            {receipts.error}
+          </p>
+        )}
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha y hora</th>
+                <th>Producto</th>
+                <th>Ingresó</th>
+                <th>Antes → Después</th>
+              </tr>
+            </thead>
+            <tbody>
+              {receipts.data?.map((r) => (
+                <tr key={r.id}>
+                  <td>{dateTime(r.createdAt)}</td>
+                  <td>
+                    {r.product.name}
+                    <small className="muted"> · {r.product.barcode}</small>
+                  </td>
+                  <td>+{r.quantity}</td>
+                  <td>
+                    {r.before} → {r.after}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!receipts.loading && !receipts.data?.length && (
+          <p className="muted">Todavía no registraste ingresos.</p>
+        )}
+      </section>
       {list.loading && <p className="muted">Cargando productos…</p>}
       {list.data && !list.data.products.length && (
         <div className="card empty">

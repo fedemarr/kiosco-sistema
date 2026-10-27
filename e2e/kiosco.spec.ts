@@ -440,6 +440,7 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
   await page.getByLabel('Buscar producto').fill(barcode);
   await page.getByLabel('Buscar producto').press('Enter');
   await expect(page.locator('.pos-cart-row .quantity span')).toHaveText('2');
+  await page.getByLabel('Efectivo recibido ($)', { exact: true }).fill('1');
   await expect(page.getByRole('button', { name: 'Confirmar cobro' })).toBeDisabled();
   const quotation = await page.request.post('/api/sales/quote', {
     headers: { Origin: baseURL! },
@@ -541,6 +542,135 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
       await page.request.post('/api/shifts/close', {
         headers: { Origin: baseURL! },
         data: { countedCash: 0 },
+      })
+    ).status(),
+  ).toBe(200);
+});
+
+test('búsqueda flexible, ingresos confirmados, cobro justo y detalle del turno', async ({
+  page,
+  baseURL,
+}, testInfo) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  const origin = { Origin: baseURL! };
+  const category = (await db.product.findUniqueOrThrow({ where: { id: productId } })).categoryId;
+  const tag = crypto.randomUUID().slice(0, 8);
+  const name = `Galletitas Placer Pera ${tag}`;
+  const saved = await page.request.post('/api/products', {
+    headers: origin,
+    data: {
+      name,
+      barcode: `PERA-${tag}`,
+      categoryId: category,
+      price: 10000,
+      cost: 5000,
+      minStock: 0,
+      trackStock: true,
+    },
+  });
+  expect(saved.status()).toBe(200);
+  const p = (await saved.json()).data;
+  expect(
+    (
+      await page.request.post(`/api/products/${p.id}/movements`, {
+        headers: origin,
+        data: { type: 'RECEIPT', quantity: 3, requestKey: crypto.randomUUID() },
+      })
+    ).status(),
+  ).toBe(200);
+  await page.goto('/stock');
+  await page.getByLabel('Buscar en stock').fill(`pera placer ${tag}`);
+  const card = page.locator('article').filter({ hasText: name });
+  await expect(card).toBeVisible();
+  await card.getByRole('button', { name: '+ Cargar', exact: true }).click();
+  await page.getByLabel('Cantidad a sumar', { exact: true }).fill('2');
+  await page.getByRole('button', { name: 'Registrar movimiento', exact: true }).click();
+  const receipts = page.getByRole('region', { name: 'Ingresos recientes de stock', exact: true });
+  await expect(receipts.getByRole('row').filter({ hasText: name })).toHaveCount(2);
+  await page.reload();
+  await expect(receipts.getByRole('row').filter({ hasText: name })).toHaveCount(2);
+  expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(5);
+  expect(
+    (
+      await page.request.post('/api/shifts/open', {
+        headers: origin,
+        data: { type: 'NIGHT', openingCash: 0 },
+      })
+    ).status(),
+  ).toBe(200);
+  await page.goto('/caja');
+  await page.getByLabel('Buscar producto').fill(`pera placer ${tag}`);
+  await page.getByRole('button').filter({ hasText: name }).click();
+  const charge = page.getByRole('button', { name: 'Confirmar cobro' });
+  await expect(charge).toBeEnabled();
+  await expect(charge).toContainText('Cobrar justo');
+  const posted = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === '/api/sales' && r.method() === 'POST',
+  );
+  await charge.click();
+  const payload = (await posted).postDataJSON();
+  expect(payload.received).toBe(payload.payments[0].amount);
+  await expect(page.getByRole('status')).toContainText('Cobro registrado');
+  const shift = (await (await page.request.get('/api/shifts/current')).json()).data;
+  expect(shift.saleCount).toBe(1);
+  expect(shift.saleTotal).toBe(payload.received);
+  if (testInfo.project.name === 'mobile') await page.locator('.pos-turn-heading').click();
+  await page.locator('.pos-sale summary').first().click();
+  await expect(page.locator('.pos-sale').first().getByLabel('Detalle de venta')).toContainText(
+    name,
+  );
+  await expect(page.getByLabel('Totales del turno')).toContainText(money(payload.received));
+  await page.screenshot({ path: `.screenshots/detalle-turno-${testInfo.project.name}.png` });
+  if (testInfo.project.name === 'mobile') await page.locator('.pos-turn-heading').click();
+  await page.getByLabel('Buscar producto').fill(`pera placer ${tag}`);
+  await page.getByRole('button').filter({ hasText: name }).click();
+  for (let i = 0; i < 4; i++)
+    await page.getByRole('button', { name: `Sumar ${name}`, exact: true }).click();
+  await page.getByRole('radio', { name: 'Mercado Pago', exact: true }).click();
+  await expect(
+    page.getByRole('region', { name: 'Caja', exact: true }).getByRole('alert'),
+  ).toContainText('pedís 5, quedan 4');
+  await expect(charge).toBeDisabled();
+  await page.getByRole('radio', { name: 'Efectivo', exact: true }).click();
+  await expect(charge).toBeDisabled();
+  expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(4);
+  await page.goto('/reportes');
+  const range = page.getByRole('form', { name: 'Rango de fechas', exact: true });
+  const start = new Date(
+    new Date(businessDate(new Date(), true) + 'T12:00:00Z').getTime() - 7 * 86400000,
+  )
+    .toISOString()
+    .slice(0, 10);
+  await range.getByLabel('Desde', { exact: true }).fill(start);
+  await range.getByLabel('Hasta', { exact: true }).fill(businessDate(new Date(), true));
+  await range.getByRole('button', { name: 'Aplicar rango' }).click();
+  await expect(page.getByText('Período:', { exact: false })).toContainText(
+    start.split('-').reverse().join('/'),
+  );
+  const shiftRow = page.locator('.shift-report-row').filter({ hasText: 'Dueño de prueba' }).first();
+  await shiftRow.locator(':scope > summary').click();
+  await expect(shiftRow).toContainText(name);
+  await shiftRow.getByText('Ver detalle de venta', { exact: true }).first().click();
+  await expect(shiftRow.getByLabel('Detalle de venta').first()).toContainText(
+    money(payload.received),
+  );
+  await page
+    .getByRole('navigation', { name: 'Panel del dueño', exact: true })
+    .getByRole('button', { name: 'Semana', exact: true })
+    .click();
+  await expect(page.locator('.week-bars > div')).toHaveCount(8);
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    .toBe(true);
+  expect(
+    (
+      await page.request.post('/api/shifts/close', {
+        headers: origin,
+        data: { countedCash: payload.received },
       })
     ).status(),
   ).toBe(200);

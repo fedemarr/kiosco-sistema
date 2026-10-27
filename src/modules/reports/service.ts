@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { businessDate } from '@/lib/format';
 import { AppError } from '@/lib/errors';
 export function reportRange(url: URL) {
-  const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  const day = z.iso.date();
   const from = day.parse(url.searchParams.get('from') || businessDate(new Date(), true));
   const to = day.parse(url.searchParams.get('to') || from);
   if (from > to || new Date(to).getTime() - new Date(from).getTime() > 92 * 86400000)
@@ -17,9 +17,12 @@ export async function report(url: URL) {
     orderBy: { openedAt: 'desc' },
     include: {
       user: { select: { name: true, id: true } },
-      operations: { where: { voidedAt: null }, include: { items: true, payments: true } },
+      operations: {
+        where: { voidedAt: null },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: { items: true, payments: true },
+      },
     },
-    take: 1000,
   });
   const operations = shifts.flatMap((s) => s.operations).filter((o) => o.type !== 'OWNER');
   const sales = operations.filter((o) => o.type === 'SALE');
@@ -94,6 +97,6 @@ export async function report(url: URL) {
     lowStock,
     lowStockCount: lowStockCounts[0].count,
     pendingRequests,
-    truncated: shifts.length === 1000,
+    truncated: false,
   };
 }

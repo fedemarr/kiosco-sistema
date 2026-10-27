@@ -55,6 +55,22 @@ async function dispatch(request: Request, context: Context) {
       return { changed: true };
     }
     if (method === 'GET' && key === 'catalog') return listProducts(url, false);
+    if (method === 'GET' && key === 'stock-receipts') {
+      requirePermission(user, 'stock');
+      return db.stockMovement.findMany({
+        where: { userId: user.id, type: 'RECEIPT' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 30,
+        select: {
+          id: true,
+          quantity: true,
+          before: true,
+          after: true,
+          createdAt: true,
+          product: { select: { name: true, barcode: true } },
+        },
+      });
+    }
     if (method === 'GET' && key === 'categories')
       return db.category.findMany({ orderBy: { name: 'asc' }, take: 200 });
     if (method === 'POST' && key === 'categories') {
