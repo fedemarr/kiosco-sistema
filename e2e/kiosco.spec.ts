@@ -61,6 +61,14 @@ test.beforeAll(async () => {
     });
   });
 });
+test.beforeEach(async () => {
+  if (!new URL(process.env.DATABASE_URL!).pathname.endsWith('_test'))
+    throw new Error('E2E requiere base de pruebas.');
+  // Cada caso usa una sesión nueva; no agotar el límite de login del usuario fixture.
+  await db.rateLimit.deleteMany({
+    where: { key: { in: [`login-user:${ownerLogin}`, `login-user:${sellerLogin}`] } },
+  });
+});
 test.afterAll(async () => {
   await db.session.deleteMany({ where: { userId: { in: [ownerId, sellerId].filter(Boolean) } } });
   await db.user.updateMany({
@@ -440,6 +448,8 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
   await page.getByLabel('Buscar producto').fill(barcode);
   await page.getByLabel('Buscar producto').press('Enter');
   await expect(page.locator('.pos-cart-row .quantity span')).toHaveText('2');
+  await expect(page.getByLabel('Buscar producto')).toHaveValue('');
+  await expect(page.getByLabel('Buscar producto')).toBeFocused();
   await page.getByLabel('Efectivo recibido ($)', { exact: true }).fill('1');
   await expect(page.getByRole('button', { name: 'Confirmar cobro' })).toBeDisabled();
   const quotation = await page.request.post('/api/sales/quote', {
@@ -547,6 +557,58 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
   ).toBe(200);
 });
 
+test('Stock limpia el buscador al encontrar, conserva el resultado y respeta el siguiente escaneo', async ({
+  page,
+}) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  const first = await db.product.findUniqueOrThrow({ where: { id: productId } });
+  const second = await db.product.create({
+    data: {
+      name: `Otro producto ${crypto.randomUUID()}`,
+      barcode: `OTRO-${crypto.randomUUID()}`,
+      categoryId: first.categoryId,
+      price: 10000,
+      cost: 5000,
+      trackStock: false,
+    },
+  });
+  await page.goto('/stock');
+  const input = page.getByLabel('Buscar en stock');
+  await input.fill(barcode);
+  await input.press('Enter');
+  await expect(input).toHaveValue('');
+  await expect(input).toBeFocused();
+  await expect(page.locator('article')).toHaveCount(1);
+  await expect(page.locator('article')).toContainText(first.name);
+  await input.fill(second.barcode);
+  await input.press('Enter');
+  await expect(input).toHaveValue('');
+  await expect(input).toBeFocused();
+  await expect(page.locator('article')).toHaveCount(1);
+  await expect(page.locator('article')).toContainText(second.name);
+  await page.route(`**/api/products?q=${barcode}&page=1`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
+  const response = page.waitForResponse((r) => new URL(r.url()).searchParams.get('q') === barcode);
+  await input.fill(barcode);
+  await input.press('Enter');
+  await input.fill('Nueva búsqueda');
+  await response;
+  await expect(input).toHaveValue('Nueva búsqueda');
+  await page.unrouteAll({ behavior: 'wait' });
+  await input.fill(`INEXISTENTE-${crypto.randomUUID()}`);
+  const unknown = await input.inputValue();
+  await input.press('Enter');
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'No encontramos el producto' }),
+  ).toBeVisible();
+  await expect(input).toHaveValue(unknown);
+});
 test('búsqueda flexible, ingresos confirmados, cobro justo y detalle del turno', async ({
   page,
   baseURL,

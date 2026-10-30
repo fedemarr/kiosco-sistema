@@ -38,6 +38,9 @@ export function StockScreen() {
   const access = can(user, 'stock');
   const owner = can(user, 'owner');
   const [search, setSearch] = useState('');
+  const [foundQuery, setFoundQuery] = useState('');
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchGeneration = useRef(0);
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState<Modal | null>(null);
   const [message, setMessage] = useState('');
@@ -45,7 +48,7 @@ export function StockScreen() {
   const [busy, setBusy] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const list = useRemote<ProductList>(
-    access ? `products?q=${encodeURIComponent(search)}&page=${page}` : null,
+    access ? `products?q=${encodeURIComponent(search || foundQuery)}&page=${page}` : null,
   );
   const categories = useRemote<Category[]>(access ? 'categories' : null);
   const receipts = useRemote<
@@ -65,6 +68,26 @@ export function StockScreen() {
   function close() {
     dialog.current?.close();
     setModal(null);
+  }
+  async function submitSearch() {
+    const query = search.trim();
+    if (!query || busy) return;
+    const generation = ++searchGeneration.current;
+    try {
+      const result = await request<ProductList>(`products?q=${encodeURIComponent(query)}&page=1`);
+      if (generation !== searchGeneration.current) return;
+      if (!result.total) {
+        setError('No encontramos el producto. Revisá el código o probá con el nombre.');
+        return;
+      }
+      setError('');
+      setFoundQuery(query);
+      setSearch('');
+      setPage(1);
+      searchInput.current?.focus();
+    } catch (e) {
+      if (generation === searchGeneration.current) setError(errorMessage(e));
+    }
   }
   async function action(fn: () => Promise<unknown>, success: string) {
     setBusy(true);
@@ -133,12 +156,22 @@ export function StockScreen() {
         <div className="search" style={{ flex: 1, minWidth: 180 }}>
           <Search size={20} />
           <input
+            ref={searchInput}
             aria-label="Buscar en stock"
+            enterKeyHint="search"
             value={search}
             placeholder="Nombre o código de barras"
             onChange={(e) => {
+              searchGeneration.current++;
+              setFoundQuery('');
               setSearch(e.target.value);
               setPage(1);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (!e.repeat) void submitSearch();
+              }
             }}
           />
         </div>
@@ -190,6 +223,22 @@ export function StockScreen() {
         <small>{list.data?.total || 0} productos activos</small>
         <small>Actualización cada 15 segundos</small>
       </div>
+      {foundQuery && (
+        <div className="row between toolbar">
+          <small>Resultados de “{foundQuery}”. Buscador listo para escanear otro producto.</small>
+          <button
+            onClick={() => {
+              searchGeneration.current++;
+              setFoundQuery('');
+              setSearch('');
+              setPage(1);
+              searchInput.current?.focus();
+            }}
+          >
+            Ver todos los productos
+          </button>
+        </div>
+      )}
       <section className="card stock-receipts" aria-label="Ingresos recientes de stock">
         <h2>Ingresos recientes confirmados</h2>
         <p className="muted">

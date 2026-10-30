@@ -1,5 +1,11 @@
 # Progreso · 24/10/2026
 
+## Buscador listo para el siguiente escaneo · 30/10/2026
+- Stock: al presionar Enter y encontrar resultados, se vacía el campo y se mantiene el foco, conservando el producto filtrado en pantalla. Se muestra el criterio encontrado y una opción para volver a todos los productos. Si no hay coincidencias o falla la consulta, se conserva el texto para corregirlo.
+- Una respuesta demorada no limpia una búsqueda nueva. Enter sostenido no dispara búsquedas repetidas. Caja conserva su limpieza inmediata y foco tras agregar, incluyendo escaneos consecutivos mientras llegan respuestas.
+- Cambio de interfaz únicamente: no modifica productos, ventas ni permisos. Cache offline v12.
+- Validación: lint y build con TypeScript correctos; 18 E2E aprobadas en móvil/escritorio. Verifican campo vacío, foco, resultado conservado, dos búsquedas sucesivas, respuesta demorada y código inexistente. Los casos usan su límite de login aislado en la base de pruebas; producción conserva sus límites.
+
 ## Operativa POS, ingresos y reportes · 27/10/2026
 - Turnos: orden explícito de más reciente a más antiguo con fecha/hora y desempate por ID. Se quitó el corte de 100 operaciones del turno actual. Total vendido completo, cobrado y desglose por efectivo/MP/tarjeta; detalle común con ítems, cantidades, subtotales, recargos/descuentos y pagos. En celular el resumen se amplía sobre Caja para poder consultar operaciones.
 - Búsqueda por tokens parciales independientes, sin importar orden ni mayúsculas, en catálogo, Stock y catálogo offline. Mantiene lectura por código y escape literal de comodines SQL. No implementa corrección automática de errores ortográficos.
