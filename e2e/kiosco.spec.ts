@@ -557,6 +557,125 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
   ).toBe(200);
 });
 
+test('turno y ventas confirmadas se recuperan en otro equipo aunque venza la sesión anterior', async ({
+  page,
+  playwright,
+  baseURL,
+}, testInfo) => {
+  const username = `recovery-${crypto.randomUUID().slice(0, 8)}`;
+  const user = await db.user.create({
+    data: {
+      name: 'Vendedor recuperado',
+      username,
+      passwordHash: await bcrypt.hash(password, 12),
+      role: 'SELLER',
+    },
+  });
+  const firstDevice = await playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Origin: baseURL! },
+  });
+  try {
+    expect(
+      (await firstDevice.post('/api/auth/login', { data: { username, password } })).status(),
+    ).toBe(200);
+    const opened = await firstDevice.post('/api/shifts/open', {
+      data: { type: 'NIGHT', openingCash: 50000 },
+    });
+    expect(opened.status()).toBe(200);
+    const shift = (await opened.json()).data;
+    const cart = { type: 'SALE', items: [{ kind: 'product', productId, quantity: 1 }] };
+    const q = (await (await firstDevice.post('/api/sales/quote', { data: cart })).json()).data;
+    const firstSale = await firstDevice.post('/api/sales', {
+      data: {
+        ...cart,
+        shiftId: shift.id,
+        idempotencyKey: crypto.randomUUID(),
+        quoteToken: q.quoteToken,
+        payments: [{ method: 'CASH', amount: q.total }],
+        received: q.total,
+      },
+    });
+    expect(firstSale.status()).toBe(200);
+    const sale = (await firstSale.json()).data;
+    const stockAfterSale = (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock;
+    // Simular equipo perdido: descartar contexto y vencer su sesión, sin cerrar caja.
+    await firstDevice.dispose();
+    await db.session.updateMany({
+      where: { userId: user.id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    await page.goto('/login');
+    await page.getByLabel('Usuario', { exact: true }).fill(username);
+    await page.getByLabel('Contraseña', { exact: true }).fill(password);
+    await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+    await expect(page.getByRole('heading', { name: 'Turno Noche', exact: true })).toBeVisible();
+    const current = (await (await page.request.get('/api/shifts/current')).json()).data;
+    expect(current).toMatchObject({
+      id: shift.id,
+      closedAt: null,
+      openingCash: 50000,
+      saleCount: 1,
+      saleTotal: q.total,
+      totals: { CASH: q.total, MP: 0, CARD: 0 },
+    });
+    expect(current.operations.map((o: { id: string }) => o.id)).toContain(sale.id);
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+      stockAfterSale,
+    );
+    if (testInfo.project.name === 'mobile') await page.locator('.pos-turn-heading').click();
+    await expect(page.locator('.pos-sale')).toHaveCount(1);
+    await page.locator('.pos-sale summary').click();
+    await expect(page.locator('.pos-sale')).toContainText(money(q.total));
+    const headers = { Origin: baseURL! };
+    expect(
+      (
+        await page.request.post('/api/shifts/open', {
+          headers,
+          data: { type: 'MORNING', openingCash: 0 },
+        })
+      ).status(),
+    ).toBe(409);
+    const q2 = (await (await page.request.post('/api/sales/quote', { headers, data: cart })).json())
+      .data;
+    expect(
+      (
+        await page.request.post('/api/sales', {
+          headers,
+          data: {
+            ...cart,
+            shiftId: shift.id,
+            idempotencyKey: crypto.randomUUID(),
+            quoteToken: q2.quoteToken,
+            payments: [{ method: 'MP', amount: q2.total }],
+          },
+        })
+      ).status(),
+    ).toBe(200);
+    const continued = (await (await page.request.get('/api/shifts/current')).json()).data;
+    expect(continued).toMatchObject({
+      id: shift.id,
+      saleCount: 2,
+      saleTotal: q.total + q2.total,
+      closedAt: null,
+    });
+    await page.goto('/turnos');
+    await expect(page.getByLabel('Continuidad del turno')).toContainText('mismo usuario');
+    expect(
+      (
+        await page.request.post('/api/shifts/close', {
+          headers,
+          data: { countedCash: 50000 + q.total },
+        })
+      ).status(),
+    ).toBe(200);
+    expect((await db.shift.findUniqueOrThrow({ where: { id: shift.id } })).difference).toBe(0);
+  } finally {
+    await firstDevice.dispose();
+    await db.session.deleteMany({ where: { userId: user.id } });
+    await db.user.update({ where: { id: user.id }, data: { deletedAt: new Date() } });
+  }
+});
 test('Stock limpia el buscador al encontrar, conserva el resultado y respeta el siguiente escaneo', async ({
   page,
 }) => {

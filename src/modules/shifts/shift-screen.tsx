@@ -110,6 +110,11 @@ export function ShiftScreen() {
         </div>
       ) : (
         <div className="stack">
+          <p className="note" aria-label="Continuidad del turno">
+            Tu turno y las ventas confirmadas están guardados en línea. Si se apaga o cambia la
+            computadora, ingresá con el mismo usuario para continuar. El turno solo termina cuando
+            confirmás el cierre de caja.
+          </p>
           <div className="card row between">
             <div>
               <h2>{shiftNames[shift.type]}</h2>

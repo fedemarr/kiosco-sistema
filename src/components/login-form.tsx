@@ -78,6 +78,10 @@ export function LoginForm() {
           <ShieldCheck size={15} />
           Tu sesión dura 7 días.
         </small>
+        <small>
+          Si tenías un turno abierto, continúa al ingresar con tu mismo usuario, incluso desde otra
+          computadora.
+        </small>
       </div>
     </div>
   );

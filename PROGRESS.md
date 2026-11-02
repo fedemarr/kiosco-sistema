@@ -1,5 +1,12 @@
 # Progreso · 24/10/2026
 
+## Continuidad de turno entre equipos · 02/11/2026
+- Verificación de persistencia: turnos y operaciones confirmadas se guardan en Postgres, asociados al usuario. Apagar la PC, perder el navegador, cerrar sesión o vencer la sesión no ejecuta el cierre de caja. Al iniciar sesión se consulta el turno abierto del usuario; solo el cierre explícito lo termina.
+- Se aclara en el ingreso y en Mi turno cómo continuar con el mismo usuario desde otro equipo. No se alteran turnos, operaciones ni permisos existentes. Cache offline v13.
+- Prueba de regresión en base local: vender en un primer contexto, descartarlo sin cerrar caja, vencer la sesión, entrar en un navegador sin datos del primero, recuperar el mismo ID/ventas/efectivo inicial/totales/stock, impedir una segunda apertura, seguir vendiendo y cerrar con diferencia cero.
+- Límite explícito: cobros sin conexión que aún están pendientes dependen del almacenamiento del dispositivo hasta sincronizar. No se promete recuperar esos datos desde una PC destruida antes de enviarlos al servidor. El carrito sin cobrar no equivale a una venta confirmada.
+- Validación: lint y build con TypeScript correctos; 20 E2E aprobadas en bases locales, con recuperación entre sesiones/equipos en móvil y escritorio. Sin operaciones de prueba ni cambios de datos en producción.
+
 ## Buscador listo para el siguiente escaneo · 30/10/2026
 - Stock: al presionar Enter y encontrar resultados, se vacía el campo y se mantiene el foco, conservando el producto filtrado en pantalla. Se muestra el criterio encontrado y una opción para volver a todos los productos. Si no hay coincidencias o falla la consulta, se conserva el texto para corregirlo.
 - Una respuesta demorada no limpia una búsqueda nueva. Enter sostenido no dispara búsquedas repetidas. Caja conserva su limpieza inmediata y foco tras agregar, incluyendo escaneos consecutivos mientras llegan respuestas.
