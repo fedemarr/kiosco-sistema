@@ -557,6 +557,159 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
   ).toBe(200);
 });
 
+test('pendiente viejo confirmado desaparece y una respuesta tardía no lo vuelve a crear', async ({
+  page,
+  baseURL,
+}) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  const headers = { Origin: baseURL! };
+  const shift = (
+    await (
+      await page.request.post('/api/shifts/open', {
+        headers,
+        data: { type: 'NIGHT', openingCash: 0 },
+      })
+    ).json()
+  ).data;
+  const cart = { type: 'SALE', items: [{ kind: 'product', productId, quantity: 1 }] };
+  const q = (await (await page.request.post('/api/sales/quote', { headers, data: cart })).json())
+    .data;
+  const payload = {
+    ...cart,
+    shiftId: shift.id,
+    idempotencyKey: crypto.randomUUID(),
+    quoteToken: q.quoteToken,
+    payments: [{ method: 'MP', amount: q.total }],
+  };
+  const sold = await page.request.post('/api/sales', { headers, data: payload });
+  expect(sold.status()).toBe(200);
+  const operation = (await sold.json()).data;
+  await db.offlineConflict.create({
+    data: {
+      key: payload.idempotencyKey,
+      userId: ownerId,
+      payload,
+      code: 'INSUFFICIENT_STOCK',
+      message: 'Aviso viejo de prueba',
+    },
+  });
+  await page.evaluate(
+    async ({ payload, userId }) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const open = indexedDB.open('kiosco-pos-v1', 2);
+        open.onsuccess = () => resolve(open.result);
+        open.onerror = () => reject(open.error);
+      });
+      const tx = db.transaction('sales', 'readwrite');
+      tx.objectStore('sales').put({
+        key: payload.idempotencyKey,
+        userId,
+        payload,
+        status: 'REVIEW',
+        error: 'Aviso viejo de prueba',
+        createdAt: new Date().toISOString(),
+      });
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+      window.dispatchEvent(new Event('queue-change'));
+    },
+    { payload, userId: ownerId },
+  );
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async () => {
+          const db = await new Promise<IDBDatabase>((resolve) => {
+            const open = indexedDB.open('kiosco-pos-v1', 2);
+            open.onsuccess = () => resolve(open.result);
+          });
+          const tx = db.transaction('sales');
+          const request = tx.objectStore('sales').count();
+          const count = await new Promise<number>((resolve) => {
+            request.onsuccess = () => resolve(request.result);
+          });
+          db.close();
+          return count;
+        }),
+      { timeout: 15000 },
+    )
+    .toBe(0);
+  expect(await db.operation.count({ where: { id: operation.id } })).toBe(1);
+  await db.offlineConflict.delete({ where: { key: payload.idempotencyKey } });
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const received = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  await page.route(
+    '**/api/sales/sync',
+    async (route) => {
+      started();
+      await gate;
+      await route.fulfill({
+        status: 409,
+        json: {
+          success: false,
+          error: { code: 'INSUFFICIENT_STOCK', message: 'Rechazo tardío de prueba' },
+        },
+      });
+    },
+    { times: 1 },
+  );
+  const late = { ...payload, idempotencyKey: crypto.randomUUID() };
+  await page.evaluate(
+    async ({ payload, userId }) => {
+      const db = await new Promise<IDBDatabase>((resolve) => {
+        const open = indexedDB.open('kiosco-pos-v1', 2);
+        open.onsuccess = () => resolve(open.result);
+      });
+      const tx = db.transaction('sales', 'readwrite');
+      tx.objectStore('sales').put({
+        key: payload.idempotencyKey,
+        userId,
+        payload,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+      await new Promise<void>((resolve) => {
+        tx.oncomplete = () => resolve();
+      });
+      db.close();
+      window.dispatchEvent(new Event('queue-change'));
+    },
+    { payload: late, userId: ownerId },
+  );
+  await received;
+  await page.evaluate(async (key) => {
+    const db = await new Promise<IDBDatabase>((resolve) => {
+      const open = indexedDB.open('kiosco-pos-v1', 2);
+      open.onsuccess = () => resolve(open.result);
+    });
+    const tx = db.transaction('sales', 'readwrite');
+    tx.objectStore('sales').delete(key);
+    await new Promise<void>((resolve) => {
+      tx.oncomplete = () => resolve();
+    });
+    db.close();
+  }, late.idempotencyKey);
+  const response = page.waitForResponse((r) => r.url().endsWith('/api/sales/sync'));
+  release();
+  await response;
+  await expect(page.getByText('Ver cobros pendientes', { exact: true })).toHaveCount(0);
+  expect(
+    (await page.request.post('/api/shifts/close', { headers, data: { countedCash: 0 } })).status(),
+  ).toBe(200);
+});
 test('turno y ventas confirmadas se recuperan en otro equipo aunque venza la sesión anterior', async ({
   page,
   playwright,

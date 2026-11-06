@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { quote, checkout, voidOperation } from '@/modules/sales/service';
 import { adjustStock, saveProduct, mergeProducts, listProducts } from '@/modules/stock/service';
 import { report, reportRange } from '@/modules/reports/service';
-import { syncCheckout } from '@/modules/offline/service';
+import { syncCheckout, conflictStatus } from '@/modules/offline/service';
 import { importWorkbook, exportWorkbook } from '@/modules/stock/excel';
 import ExcelJS from 'exceljs';
 import { openShift, closeShift } from '@/modules/shifts/service';
@@ -220,6 +220,47 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
     await voidOperation(owner, operation.id, 'Anulación posterior a fusión');
     expect((await db.product.findUniqueOrThrow({ where: { id: source.id } })).stock).toBe(0);
     expect((await db.product.findUniqueOrThrow({ where: { id: target.id } })).stock).toBe(5);
+  });
+  it('cobro normal y sincronización simultáneos del último stock devuelven la misma venta', async () => {
+    const p = await product(15);
+    const input = await payload(owner, p.id, 15);
+    const results = await Promise.all([
+      checkout(owner, input),
+      syncCheckout(owner, input),
+      syncCheckout(owner, input),
+    ]);
+    expect(new Set(results.map((r) => r.id)).size).toBe(1);
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(0);
+    expect(await db.stockMovement.count({ where: { productId: p.id, type: 'SALE' } })).toBe(1);
+    const conflict = await db.offlineConflict.findUnique({ where: { key: input.idempotencyKey } });
+    expect(conflict === null || conflict.resolved).toBe(true);
+  });
+  it('un aviso viejo de stock se reconoce confirmado solamente si coincide usuario y solicitud', async () => {
+    const p = await product(1);
+    const input = await payload(owner, p.id);
+    const operation = await checkout(owner, input);
+    await db.offlineConflict.create({
+      data: {
+        key: input.idempotencyKey,
+        userId: owner.id,
+        payload: JSON.parse(JSON.stringify(input)),
+        code: 'INSUFFICIENT_STOCK',
+        message: 'Aviso viejo de prueba',
+      },
+    });
+    expect(await conflictStatus(owner, input.idempotencyKey)).toMatchObject({
+      resolved: true,
+      operationId: operation.id,
+    });
+    await expect(conflictStatus(seller, input.idempotencyKey)).rejects.toMatchObject({
+      status: 404,
+    });
+    await db.offlineConflict.update({
+      where: { key: input.idempotencyKey },
+      data: { payload: JSON.parse(JSON.stringify({ ...input, received: 123 })) },
+    });
+    expect(await conflictStatus(owner, input.idempotencyKey)).toMatchObject({ resolved: false });
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(0);
   });
   it('un cobro rechazado al sincronizar queda visible para el dueño en DB', async () => {
     const p = await product(2);

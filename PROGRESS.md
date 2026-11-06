@@ -1,5 +1,13 @@
 # Progreso · 24/10/2026
 
+## Aviso duplicado de stock tras cobro confirmado · 06/11/2026
+- Diagnóstico de concurrencia: el envío normal y la sincronización pueden procesar la misma clave mientras se espera el bloqueo del turno. El segundo envío validaba el stock ya descontado sin volver a consultar la clave y podía producir un conflicto falso.
+- Checkout vuelve a comprobar idempotencia dentro del bloqueo y al resolver una excepción antes de reportar el error. Conserva la comparación de usuario y huella completa de la solicitud; no acepta reutilizar una clave con otro contenido.
+- La consulta de un pendiente reconoce una venta ya confirmada solo si coinciden clave, usuario y huella. El navegador no vuelve a crear una entrada que otro envío ya eliminó mientras llegaba un rechazo tardío.
+- Se reconcilió el aviso reportado comprobando la operación existente y su único movimiento Kardex. Solo se actualizaron metadatos de revisión y auditoría; venta, pagos y stock intactos. Evidencia privada en data/auditoria, excluida de Git.
+- Cache offline v14. Pruebas locales incluyen envíos simultáneos del último stock, aviso histórico coincidente, permisos/huellas diferentes y respuesta tardía del navegador.
+- Validación: build con TypeScript, lint, 52 pruebas de lógica/PostgreSQL y 22 E2E aprobadas en bases locales. La prueba del navegador comprueba que un aviso confirmado se retire sin repetir venta y que un rechazo demorado no reconstruya la fila local eliminada.
+
 ## Continuidad de turno entre equipos · 02/11/2026
 - Verificación de persistencia: turnos y operaciones confirmadas se guardan en Postgres, asociados al usuario. Apagar la PC, perder el navegador, cerrar sesión o vencer la sesión no ejecuta el cierre de caja. Al iniciar sesión se consulta el turno abierto del usuario; solo el cierre explícito lo termina.
 - Se aclara en el ingreso y en Mi turno cómo continuar con el mismo usuario desde otro equipo. No se alteran turnos, operaciones ni permisos existentes. Cache offline v13.

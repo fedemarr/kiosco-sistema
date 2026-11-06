@@ -18,7 +18,7 @@ import { checkout, quote, voidOperation } from '@/modules/sales/service';
 import { currentShift, openShift, closeShift } from '@/modules/shifts/service';
 import { listUsers, createUser, updateUser, passwordSchema } from '@/modules/users/service';
 import { report } from '@/modules/reports/service';
-import { syncCheckout } from '@/modules/offline/service';
+import { syncCheckout, conflictStatus } from '@/modules/offline/service';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ path: string[] }> };
@@ -135,10 +135,7 @@ async function dispatch(request: Request, context: Context) {
       }
       const key = z.uuid().parse(path[1]);
       if (method === 'GET') {
-        const value = await db.offlineConflict.findUnique({ where: { key } });
-        if (!value || (value.userId !== user.id && !can(user, 'owner')))
-          throw new AppError('No encontramos el cobro pendiente.', 404);
-        return { resolved: value.resolved, resolution: value.resolution };
+        return conflictStatus(user, key);
       }
       if (method === 'PATCH') {
         requirePermission(user, 'owner');

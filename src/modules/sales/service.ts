@@ -103,8 +103,8 @@ export async function checkout(user: Actor, body: unknown) {
     ...(input.note ? { note: input.note } : {}),
   };
   const requestHash = hash(input);
-  const replay = async () => {
-    const old = await db.idempotency.findUnique({
+  const replay = async (client: Prisma.TransactionClient = db) => {
+    const old = await client.idempotency.findUnique({
       where: { key: input.idempotencyKey },
       include: { operation: { include: { payments: true, items: true } } },
     });
@@ -136,6 +136,10 @@ export async function checkout(user: Actor, body: unknown) {
     return await transaction(async (tx) => {
       // Bloquear el turno serializa cobro/cierre y evita registrar ventas después del cierre.
       await tx.$queryRaw`SELECT id FROM shifts WHERE user_id = ${user.id}::uuid AND closed_at IS NULL AND NOT archived FOR UPDATE`;
+      // El otro envío puede haberse confirmado mientras esperábamos el bloqueo.
+      // Consultar la clave antes de volver a validar el stock ya descontado.
+      const recorded = await replay(tx);
+      if (recorded) return recorded;
       const shift = await tx.shift.findFirst({
         where: { userId: user.id, closedAt: null, archived: false },
       });
@@ -199,10 +203,8 @@ export async function checkout(user: Actor, body: unknown) {
     });
   } catch (error) {
     // Otra petición con la misma clave puede haber ganado la transacción.
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const saved = await replay();
-      if (saved) return saved;
-    }
+    const saved = await replay();
+    if (saved) return saved;
     if (error instanceof AppError || error instanceof Prisma.PrismaClientKnownRequestError)
       throw error;
     if (

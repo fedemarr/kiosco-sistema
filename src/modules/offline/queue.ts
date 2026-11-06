@@ -77,7 +77,12 @@ async function processSales(userId: string) {
       )
         break;
       if (error.status === 401 || error.status === 403 || error.status === 429) break;
-      await db.put('sales', { ...sale, status: 'REVIEW', error: error.message });
+      // No resucitar un pendiente que el envío directo ya confirmó o descartó.
+      const tx = db.transaction('sales', 'readwrite');
+      const current = (await tx.store.get(sale.key)) as Pending | undefined;
+      if (current?.status === 'PENDING')
+        await tx.store.put({ ...current, status: 'REVIEW', error: error.message });
+      await tx.done;
     }
   }
   window.dispatchEvent(new Event('queue-change'));
