@@ -6,6 +6,19 @@ import { AppError } from '@/lib/errors';
 import { businessDate } from '@/lib/format';
 import { cents } from '@/modules/stock/service';
 import { offlinePermit } from '@/modules/offline/permit';
+export async function shiftStatus() {
+  return db.shift.findMany({
+    where: { closedAt: null, archived: false },
+    orderBy: [{ openedAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      userId: true,
+      type: true,
+      openedAt: true,
+      user: { select: { name: true } },
+    },
+  });
+}
 export async function currentShift(userId: string) {
   const shift = await db.shift.findFirst({
     where: { userId, closedAt: null, archived: false },
@@ -36,8 +49,20 @@ export async function openShift(userId: string, body: unknown) {
     .strict()
     .parse(body);
   return transaction(async (tx) => {
-    if (await tx.shift.findFirst({ where: { userId, closedAt: null, archived: false } }))
-      throw new AppError('Ya tenés un turno abierto.', 409);
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(730911)::text`;
+    const active = await tx.shift.findFirst({
+      where: { closedAt: null, archived: false },
+      include: { user: { select: { name: true } } },
+      orderBy: [{ openedAt: 'asc' }, { id: 'asc' }],
+    });
+    if (active)
+      throw new AppError(
+        active.userId === userId
+          ? 'Ya tenés un turno abierto. Continuá ese turno o cerralo antes de abrir otro.'
+          : `${active.user.name} tiene un turno abierto. Debe cerrarlo y rendir la caja antes de que abra otro empleado.`,
+        409,
+        'SHIFT_ALREADY_OPEN',
+      );
     const shift = await tx.shift.create({
       data: { ...input, userId, businessDate: businessDate(new Date(), input.type === 'NIGHT') },
     });
@@ -46,11 +71,11 @@ export async function openShift(userId: string, body: unknown) {
   });
 }
 export async function closeShift(userId: string, body: unknown) {
-  const input = z.object({ countedCash: cents }).strict().parse(body);
+  const input = z.object({ shiftId: z.uuid(), countedCash: cents }).strict().parse(body);
   return transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM shifts WHERE user_id = ${userId}::uuid AND closed_at IS NULL AND NOT archived FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM shifts WHERE id = ${input.shiftId}::uuid AND user_id = ${userId}::uuid FOR UPDATE`;
     const shift = await tx.shift.findFirst({
-      where: { userId, closedAt: null, archived: false },
+      where: { id: input.shiftId, userId, archived: false },
       include: {
         operations: {
           where: { voidedAt: null },
@@ -59,7 +84,17 @@ export async function closeShift(userId: string, body: unknown) {
         },
       },
     });
-    if (!shift) throw new AppError('No tenés un turno abierto.', 409);
+    if (!shift)
+      throw new AppError('Ese turno no te pertenece o no está disponible.', 409, 'NO_OPEN_SHIFT');
+    if (shift.closedAt) {
+      if (shift.countedCash !== input.countedCash)
+        throw new AppError(
+          'Este turno ya fue cerrado. El efectivo rendido no se puede cambiar desde este cierre.',
+          409,
+          'SHIFT_CLOSED',
+        );
+      return shift; // Una respuesta perdida o una pestaña vieja nunca cierra el turno siguiente.
+    }
     const expectedCash =
       shift.openingCash +
       shift.operations

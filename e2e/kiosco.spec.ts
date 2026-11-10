@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import bcrypt from 'bcryptjs';
 import { db } from '../src/lib/db';
 import { money, businessDate } from '../src/lib/format';
+import { closeShift } from '../src/modules/shifts/service';
 const password = `Test-${crypto.randomUUID()}`;
 let ownerId: string;
 let sellerId: string;
@@ -64,9 +65,18 @@ test.beforeAll(async () => {
 test.beforeEach(async () => {
   if (!new URL(process.env.DATABASE_URL!).pathname.endsWith('_test'))
     throw new Error('E2E requiere base de pruebas.');
-  // Cada caso usa una sesión nueva; no agotar el límite de login del usuario fixture.
+  // Cada caso es independiente; no heredar cuotas consumidas por otros casos del fixture.
   await db.rateLimit.deleteMany({
-    where: { key: { in: [`login-user:${ownerLogin}`, `login-user:${sellerLogin}`] } },
+    where: {
+      key: {
+        in: [
+          `login-user:${ownerLogin}`,
+          `login-user:${sellerLogin}`,
+          `user:${ownerId}`,
+          `user:${sellerId}`,
+        ],
+      },
+    },
   });
 });
 test.afterAll(async () => {
@@ -76,6 +86,127 @@ test.afterAll(async () => {
     data: { deletedAt: new Date() },
   });
   await db.$disconnect();
+});
+test.afterEach(async () => {
+  // El turno es global: un fixture fallido no puede bloquear el caso o proyecto siguiente.
+  const active = await db.shift.findMany({
+    where: { closedAt: null, archived: false, user: { username: { startsWith: 'e2e-' } } },
+  });
+  for (const shift of active) await closeShift(shift.userId, { shiftId: shift.id, countedCash: 0 });
+});
+
+test('relevo de empleados: cierre definitivo, otra pestaña y copia offline sin turno viejo', async ({
+  page,
+  context,
+  playwright,
+  baseURL,
+}) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  await page.goto('/turnos');
+  await page.locator('select[name="type"]').selectOption('NIGHT');
+  await page.getByLabel('Efectivo inicial en caja ($)').fill('0');
+  await page.getByRole('button', { name: 'Abrir turno', exact: true }).click();
+  await expect(page.getByLabel('Continuidad del turno')).toBeVisible();
+  const shift = (await (await page.request.get('/api/shifts/current')).json()).data;
+  const seller = await playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Origin: baseURL! },
+  });
+  const other = await context.newPage();
+  try {
+    expect(
+      (
+        await seller.post('/api/auth/login', { data: { username: sellerLogin, password } })
+      ).status(),
+    ).toBe(200);
+    const denied = await seller.post('/api/shifts/open', {
+      data: { type: 'MORNING', openingCash: 0 },
+    });
+    expect(denied.status()).toBe(409);
+    expect((await denied.json()).error.code).toBe('SHIFT_ALREADY_OPEN');
+    await other.goto('/caja');
+    await expect(other.getByRole('heading', { name: 'Turno Noche', exact: true })).toBeVisible();
+    await other.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+    await expect
+      .poll(() =>
+        other.evaluate(async (userId) => {
+          const opened = indexedDB.open('kiosco-pos-v1');
+          const db = await new Promise<IDBDatabase>((resolve) => {
+            opened.onsuccess = () => resolve(opened.result);
+          });
+          const value = await new Promise<{ shift?: { id: string } }>((resolve) => {
+            const read = db.transaction('snapshots').objectStore('snapshots').get(userId);
+            read.onsuccess = () => resolve(read.result);
+          });
+          db.close();
+          return value?.shift?.id;
+        }, ownerId),
+      )
+      .toBe(shift.id);
+    page.once('dialog', (d) => void d.accept());
+    await page.getByLabel('Efectivo contado ($)').fill('0');
+    await page.getByRole('button', { name: 'Cerrar turno y ver diferencia', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Turno cerrado', exact: true })).toBeVisible();
+    await expect(other.getByRole('heading', { name: 'Turno Noche', exact: true })).toHaveCount(0);
+    await expect(
+      other.getByText('Abrí tu turno para empezar a cobrar.', { exact: false }),
+    ).toBeVisible();
+    // Simular una copia vieja escrita tarde por otra pestaña/carga del catálogo.
+    await other.evaluate(
+      async ({ userId, shift }) => {
+        const opened = indexedDB.open('kiosco-pos-v1');
+        const db = await new Promise<IDBDatabase>((resolve) => {
+          opened.onsuccess = () => resolve(opened.result);
+        });
+        const tx = db.transaction('snapshots', 'readwrite');
+        const store = tx.objectStore('snapshots');
+        const read = store.get(userId);
+        read.onsuccess = () => store.put({ ...read.result, shift }, userId);
+        await new Promise<void>((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+      },
+      { userId: ownerId, shift },
+    );
+    await context.setOffline(true);
+    await other.goto('/offline');
+    await expect(
+      other.getByText('Abrí tu turno para empezar a cobrar.', { exact: false }),
+    ).toBeVisible();
+    await expect(other.getByRole('heading', { name: 'Turno Noche', exact: true })).toHaveCount(0);
+    await context.setOffline(false);
+    const opened = await seller.post('/api/shifts/open', {
+      data: { type: 'MORNING', openingCash: 0 },
+    });
+    expect(opened.status()).toBe(200);
+    const next = (await opened.json()).data;
+    expect(next.id).not.toBe(shift.id);
+    // Un reenvío desde la pestaña del empleado anterior no debe cerrar al siguiente.
+    expect(
+      (
+        await page.request.post('/api/shifts/close', {
+          headers: { Origin: baseURL! },
+          data: { shiftId: shift.id, countedCash: 0 },
+        })
+      ).status(),
+    ).toBe(200);
+    expect((await (await seller.get('/api/shifts/current')).json()).data.id).toBe(next.id);
+    expect(
+      (
+        await seller.post('/api/shifts/close', { data: { shiftId: next.id, countedCash: 0 } })
+      ).status(),
+    ).toBe(200);
+  } finally {
+    await context.setOffline(false);
+    await other.close();
+    await seller.dispose();
+  }
 });
 test('aviso y cobro nocturnos cambian a las 22 y a las 06 de Buenos Aires', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-10-26T00:59:58Z') });
@@ -168,6 +299,7 @@ test('API privada y permisos actualizados en sesiones abiertas', async ({
 }) => {
   expect((await request.get('/api/products')).status()).toBe(401);
   expect((await request.get('/api/reports')).status()).toBe(401);
+  expect((await request.get('/api/shifts/status')).status()).toBe(401);
   const owner = await playwright.request.newContext({
     baseURL,
     extraHTTPHeaders: { Origin: baseURL! },
@@ -329,6 +461,7 @@ test('reportes siguen el día operativo a las 06 y conservan una fecha elegida',
   const date = page.getByLabel('Fecha de los turnos');
   await expect(date).toHaveValue('2026-10-25');
   await page.clock.setFixedTime(new Date('2026-10-26T09:00:01Z'));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await expect(date).toHaveValue('2026-10-26');
   await date.fill('2026-10-24');
   await page.clock.setFixedTime(new Date('2026-10-27T09:00:00Z'));
@@ -410,9 +543,20 @@ test('reportes reciben ventas y anulaciones de otra sesión sin recargar', async
     await expect(page.getByLabel('Estado de actualización de reportes')).toContainText(
       'Última consulta',
     );
-    expect((await seller.post('/api/shifts/close', { data: { countedCash: 0 } })).status()).toBe(
-      200,
-    );
+    expect(
+      (
+        await seller.post('/api/shifts/close', {
+          data: {
+            shiftId: (
+              await db.shift.findFirstOrThrow({
+                where: { userId: sellerId, closedAt: null, archived: false },
+              })
+            ).id,
+            countedCash: 0,
+          },
+        })
+      ).status(),
+    ).toBe(200);
   } finally {
     await seller.dispose();
   }
@@ -551,7 +695,14 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
     (
       await page.request.post('/api/shifts/close', {
         headers: { Origin: baseURL! },
-        data: { countedCash: 0 },
+        data: {
+          shiftId: (
+            await db.shift.findFirstOrThrow({
+              where: { userId: ownerId, closedAt: null, archived: false },
+            })
+          ).id,
+          countedCash: 0,
+        },
       })
     ).status(),
   ).toBe(200);
@@ -707,7 +858,19 @@ test('pendiente viejo confirmado desaparece y una respuesta tardía no lo vuelve
   await response;
   await expect(page.getByText('Ver cobros pendientes', { exact: true })).toHaveCount(0);
   expect(
-    (await page.request.post('/api/shifts/close', { headers, data: { countedCash: 0 } })).status(),
+    (
+      await page.request.post('/api/shifts/close', {
+        headers,
+        data: {
+          shiftId: (
+            await db.shift.findFirstOrThrow({
+              where: { userId: ownerId, closedAt: null, archived: false },
+            })
+          ).id,
+          countedCash: 0,
+        },
+      })
+    ).status(),
   ).toBe(200);
 });
 test('turno y ventas confirmadas se recuperan en otro equipo aunque venza la sesión anterior', async ({
@@ -818,7 +981,7 @@ test('turno y ventas confirmadas se recuperan en otro equipo aunque venza la ses
       (
         await page.request.post('/api/shifts/close', {
           headers,
-          data: { countedCash: 50000 + q.total },
+          data: { shiftId: shift.id, countedCash: 50000 + q.total },
         })
       ).status(),
     ).toBe(200);
@@ -1004,7 +1167,7 @@ test('búsqueda flexible, ingresos confirmados, cobro justo y detalle del turno'
     (
       await page.request.post('/api/shifts/close', {
         headers: origin,
-        data: { countedCash: payload.received },
+        data: { shiftId: shift.id, countedCash: payload.received },
       })
     ).status(),
   ).toBe(200);

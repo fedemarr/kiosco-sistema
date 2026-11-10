@@ -9,6 +9,7 @@ import { useUser } from '@/components/app-shell';
 import { enqueue, removePendingSale } from '@/modules/offline/queue';
 import { cacheCatalog, readSnapshot, saveSnapshot, warmCatalog } from '@/modules/offline/catalog';
 import { matchesProduct } from '@/lib/product-search';
+import { SHIFT_CHANGE_KEY } from '@/lib/shift-events';
 type Line = {
   key: string;
   name: string;
@@ -50,6 +51,7 @@ function usePos() {
   const searchRef = useRef<HTMLInputElement>(null);
   const chargeLock = useRef(false);
   const lastRequest = useRef<{ key: string; confirmed: boolean } | null>(null);
+  const loadVersion = useRef(0);
   const bindSearch = useCallback((node: HTMLInputElement | null) => {
     searchRef.current = node;
   }, []);
@@ -77,6 +79,8 @@ function usePos() {
     searchRef.current?.focus();
   }, []);
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
+    const observedAt = Date.now();
     try {
       if (!navigator.onLine) throw new ApiError('Sin conexión', 'NETWORK');
       const [s, q, c] = await Promise.all([
@@ -84,11 +88,12 @@ function usePos() {
         request<Quick[]>('quick'),
         request<Category[]>('categories'),
       ]);
+      if (version !== loadVersion.current) return;
       setShift(s);
       setQuick(q);
       setCategories(c);
       setOnline(true);
-      await saveSnapshot(user, s, q, c).catch(() => {});
+      await saveSnapshot(user, s, q, c, observedAt).catch(() => {});
       if (!warmed.current) {
         warmed.current = true;
         void warmCatalog(user.id).catch(() => {
@@ -97,6 +102,7 @@ function usePos() {
       }
     } catch (e) {
       const snapshot = await readSnapshot(user.id).catch(() => null);
+      if (version !== loadVersion.current) return;
       if (e instanceof ApiError && e.code === 'NETWORK' && snapshot) {
         setShift(snapshot.shift);
         setQuick(snapshot.quick);
@@ -119,6 +125,13 @@ function usePos() {
       setRefreshKey((key) => key + 1);
       void load();
     };
+    const shiftChanged = () => {
+      setShift(null);
+      void load();
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key === SHIFT_CHANGE_KEY) shiftChanged();
+    };
     const confirmed = (event: Event) => {
       const { key, id } = (event as CustomEvent<{ key: string; id: string }>).detail;
       if (lastRequest.current?.key === key) {
@@ -130,6 +143,8 @@ function usePos() {
     window.addEventListener('offline', offline);
     window.addEventListener('queue-change', changed);
     window.addEventListener('stock-change', changed);
+    window.addEventListener('shift-change', shiftChanged);
+    window.addEventListener('storage', storage);
     window.addEventListener('sale-confirmed', confirmed);
     document.addEventListener('visibilitychange', visibility);
     return () => {
@@ -138,6 +153,8 @@ function usePos() {
       window.removeEventListener('offline', offline);
       window.removeEventListener('queue-change', changed);
       window.removeEventListener('stock-change', changed);
+      window.removeEventListener('shift-change', shiftChanged);
+      window.removeEventListener('storage', storage);
       window.removeEventListener('sale-confirmed', confirmed);
       clearInterval(interval);
       document.removeEventListener('visibilitychange', visibility);

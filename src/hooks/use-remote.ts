@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { request, errorMessage } from '@/lib/client';
+import { SHIFT_CHANGE_KEY } from '@/lib/shift-events';
 export function useRemote<T>(path: string | null, refreshInterval = 15000) {
   const [state, setState] = useState<{
     path: string | null;
@@ -40,6 +41,13 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
     version.current++;
     active.current = null;
   }, []);
+  const setData = useCallback(
+    (data: T | null) => {
+      cancel();
+      setState({ path, data, error: '', loading: false, updatedAt: Date.now() });
+    },
+    [cancel, path],
+  );
   useEffect(() => {
     const timer = setTimeout(() => void refresh(), 100);
     const interval = setInterval(() => {
@@ -48,10 +56,18 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
     const focus = () => {
       if (!document.hidden) void refresh();
     };
+    const storage = (event: StorageEvent) => {
+      if (event.key === SHIFT_CHANGE_KEY) {
+        cancel();
+        void refresh();
+      }
+    };
     window.addEventListener('online', focus);
     window.addEventListener('focus', focus);
     window.addEventListener('sale-confirmed', focus);
     window.addEventListener('stock-change', focus);
+    window.addEventListener('shift-change', focus);
+    window.addEventListener('storage', storage);
     document.addEventListener('visibilitychange', focus);
     return () => {
       clearTimeout(timer);
@@ -61,6 +77,8 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
       window.removeEventListener('focus', focus);
       window.removeEventListener('sale-confirmed', focus);
       window.removeEventListener('stock-change', focus);
+      window.removeEventListener('shift-change', focus);
+      window.removeEventListener('storage', storage);
       document.removeEventListener('visibilitychange', focus);
     };
   }, [refresh, refreshInterval, cancel]);
@@ -69,6 +87,7 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
     error: state.path === path ? state.error : '',
     loading: path !== state.path ? !!path : state.loading,
     refresh,
+    setData,
     updatedAt: state.path === path ? state.updatedAt : null,
   };
 }

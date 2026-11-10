@@ -1,5 +1,14 @@
 # Progreso · 24/10/2026
 
+## Relevo y cierre definitivo de turnos · 10/11/2026
+- La apertura ahora exige que no haya ningún turno activo del kiosco, con bloqueo transaccional global y protección adicional en PostgreSQL. La pantalla muestra los empleados con cajas pendientes de rendición.
+- El cierre exige el ID exacto del turno y la identidad de sesión. Un reintento con el mismo efectivo devuelve el cierre original sin duplicar auditoría; un cierre viejo no puede terminar un turno nuevo. La base impide reabrir un turno cerrado o cambiarle el empleado.
+- Se mantiene la continuidad existente: apagar la PC, cerrar sesión o cambiar de equipo no cierra el turno ni borra operaciones confirmadas. No hay cierre automático por fecha/franja horaria.
+- Cierre confirmado: invalidación inmediata de pantalla, descarte de respuestas anteriores, aviso entre pestañas y marca persistente para que el snapshot offline no reviva el turno cerrado. Las escrituras del catálogo local conservan el snapshot vigente dentro de una transacción IndexedDB. Cache offline v15.
+- Revisión de producción de solo lectura: había tres turnos activos anteriores. Fede eligió que cada empleado cierre y rinda el suyo; no se cierra ninguno automáticamente ni se inventan conteos. La migración instala protecciones sin modificar esos turnos ni sus ventas. Las aperturas quedan bloqueadas hasta completar todos los cierres pendientes.
+- Documentación operativa y límites offline en `docs/TURNOS.md`. Pruebas nuevas: aperturas simultáneas por servicio y directamente en DB, identidad del cierre, cierre repetido, imposibilidad de reapertura, carrera cobro/cierre y relevo entre empleados/pestañas/offline, incluyendo la inyección de una copia vieja tras cerrar.
+- Validación local: 56 pruebas de lógica/PostgreSQL y 24 E2E contra build de producción, celular y escritorio, aprobadas. Build, TypeScript, lint y formato correctos. Los casos E2E aíslan las cuotas de sus usuarios de prueba entre escenarios; no cambian el límite de producción. La prueba del día operativo dispara el evento de regreso a primer plano para no depender de temporizadores de una pestaña en segundo plano.
+
 ## Aviso duplicado de stock tras cobro confirmado · 06/11/2026
 - Diagnóstico de concurrencia: el envío normal y la sincronización pueden procesar la misma clave mientras se espera el bloqueo del turno. El segundo envío validaba el stock ya descontado sin volver a consultar la clave y podía producir un conflicto falso.
 - Checkout vuelve a comprobar idempotencia dentro del bloqueo y al resolver una excepción antes de reportar el error. Conserva la comparación de usuario y huella completa de la solicitud; no acepta reutilizar una clave con otro contenido.

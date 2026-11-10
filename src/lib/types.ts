@@ -54,6 +54,13 @@ export type Shift = {
   operations: Operation[];
   user?: { id: string; name: string };
 };
+export type OpenShift = {
+  id: string;
+  userId: string;
+  type: Shift['type'];
+  openedAt: string;
+  user: { name: string };
+};
 export type Quotation = {
   subtotal: number;
   total: number;

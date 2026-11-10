@@ -38,7 +38,6 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
     }
     categoryId = (await db.category.create({ data: { name: `Test ${tag}` } })).id;
     await openShift(owner.id, { type: 'MORNING', openingCash: 10000 });
-    await openShift(seller.id, { type: 'MORNING', openingCash: 0 });
   });
   async function product(stock: number) {
     const p = await saveProduct(owner.id, {
@@ -112,8 +111,8 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
   it('dos dispositivos no venden dos veces el último ítem', async () => {
     const p = await product(1);
     const a = await payload(owner, p.id);
-    const b = await payload(seller, p.id);
-    const results = await Promise.allSettled([checkout(owner, a), checkout(seller, b)]);
+    const b = await payload(owner, p.id);
+    const results = await Promise.allSettled([checkout(owner, a), checkout(owner, b)]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(0);
     expect(await db.stockMovement.count({ where: { productId: p.id, type: 'SALE' } })).toBe(1);
@@ -156,6 +155,9 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
     expect(await db.stockMovement.count({ where: { productId: p.id, type: 'VOID' } })).toBe(1);
   });
   it('cierre incluye parte efectivo de mixto y diferencia', async () => {
+    const previous = await currentShift(owner.id);
+    await closeShift(owner.id, { shiftId: previous!.id, countedCash: 0 });
+    const sellerShift = await openShift(seller.id, { type: 'MORNING', openingCash: 0 });
     const p = await product(3);
     const input = await payload(seller, p.id);
     const total = input.payments[0].amount;
@@ -167,9 +169,10 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
       ],
       received: 5000,
     });
-    const closed = await closeShift(seller.id, { countedCash: 3500 });
+    const closed = await closeShift(seller.id, { shiftId: sellerShift.id, countedCash: 3500 });
     expect(closed.expectedCash).toBe(4000);
     expect(closed.difference).toBe(-500);
+    await openShift(owner.id, { type: 'MORNING', openingCash: 10000 });
   });
   it('offline verifica identidad firmada y total actual antes de registrar', async () => {
     const p = await product(5);
@@ -483,6 +486,8 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
     },
   );
   it('el turno conserva más de 100 ventas, orden explícito y totales completos', async () => {
+    const previous = await currentShift(owner.id);
+    await closeShift(owner.id, { shiftId: previous!.id, countedCash: 0 });
     const user = await db.user.create({
       data: { name: 'Turno extenso', username: `long-${tag}`, passwordHash: 'not-a-login' },
     });

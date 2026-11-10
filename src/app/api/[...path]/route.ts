@@ -15,7 +15,7 @@ import {
   cents,
 } from '@/modules/stock/service';
 import { checkout, quote, voidOperation } from '@/modules/sales/service';
-import { currentShift, openShift, closeShift } from '@/modules/shifts/service';
+import { currentShift, shiftStatus, openShift, closeShift } from '@/modules/shifts/service';
 import { listUsers, createUser, updateUser, passwordSchema } from '@/modules/users/service';
 import { report } from '@/modules/reports/service';
 import { syncCheckout, conflictStatus } from '@/modules/offline/service';
@@ -117,6 +117,7 @@ async function dispatch(request: Request, context: Context) {
       });
     }
     if (method === 'GET' && key === 'shifts/current') return currentShift(user.id);
+    if (method === 'GET' && key === 'shifts/status') return shiftStatus();
     if (method === 'POST' && key === 'shifts/open') return openShift(user.id, await req.json());
     if (method === 'POST' && key === 'shifts/close') return closeShift(user.id, await req.json());
     if (method === 'POST' && key === 'sales/quote') return quote(user, await req.json());

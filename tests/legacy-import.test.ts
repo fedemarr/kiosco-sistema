@@ -205,9 +205,9 @@ describe.skipIf(process.env.RUN_DB_TESTS !== '1')('importación histórica trans
   });
   test('se puede abrir un turno nuevo y el replay no pisa movimientos posteriores', async () => {
     const userId = legacyId('user', base);
-    await openShift(userId, { type: 'MORNING', openingCash: 0 });
+    const opened = await openShift(userId, { type: 'MORNING', openingCash: 0 });
     expect(await currentShift(userId)).not.toBeNull();
-    await closeShift(userId, { countedCash: 0 });
+    await closeShift(userId, { shiftId: opened.id, countedCash: 0 });
     await adjustStock(ownerId, plan.products[0].id, {
       type: 'RECEIPT',
       quantity: 2,

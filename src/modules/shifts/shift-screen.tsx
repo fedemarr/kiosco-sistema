@@ -4,11 +4,16 @@ import { Clock3, Wallet, CircleCheck } from 'lucide-react';
 import { useRemote } from '@/hooks/use-remote';
 import { request, errorMessage } from '@/lib/client';
 import { dateTime, money, toCents } from '@/lib/format';
-import { shiftNames, paymentNames, type Shift } from '@/lib/types';
+import { shiftNames, paymentNames, type Shift, type OpenShift } from '@/lib/types';
+import { markShiftClosed } from '@/modules/offline/catalog';
+import { publishShiftChange } from '@/lib/shift-events';
+import { useUser } from '@/components/app-shell';
 import { soldItems } from '@/modules/sales/summary';
 import { OperationDetail } from '@/modules/sales/operation-detail';
 export function ShiftScreen() {
   const remote = useRemote<Shift>('shifts/current');
+  const status = useRemote<OpenShift[]>('shifts/status');
+  const user = useUser();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [closed, setClosed] = useState<Shift | null>(null);
@@ -19,8 +24,17 @@ export function ShiftScreen() {
     setError('');
     try {
       const result = await request<Shift>(path, 'POST', body);
-      if (path.endsWith('close')) setClosed(result);
+      if (path.endsWith('close')) {
+        setClosed(result);
+        remote.setData(null);
+        await markShiftClosed(user.id, result.id).catch(() => {});
+      } else {
+        setClosed(null);
+        remote.setData({ ...result, operations: result.operations || [] });
+      }
+      publishShiftChange();
       await remote.refresh();
+      await status.refresh();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -84,6 +98,28 @@ export function ShiftScreen() {
           >
             <Clock3 size={28} />
             <h2>Empezar un turno</h2>
+            <p className="note">
+              Antes de abrir debe estar cerrado el turno anterior. Apagar la computadora o salir de
+              la cuenta no cierra el turno.
+            </p>
+            {!!status.data?.length && (
+              <div className="note" role="status">
+                <strong>Hay turnos pendientes de cierre:</strong>
+                {status.data.map((active) => (
+                  <p key={active.id}>
+                    {active.user.name} · {shiftNames[active.type]} · abierto{' '}
+                    {dateTime(active.openedAt)}
+                  </p>
+                ))}
+                Cada empleado debe ingresar con su usuario y cerrar su caja para habilitar la
+                próxima apertura.
+              </div>
+            )}
+            {status.error && (
+              <p className="error" role="alert">
+                {status.error}
+              </p>
+            )}
             <label>
               Turno
               <select name="type">
@@ -103,7 +139,12 @@ export function ShiftScreen() {
                 placeholder="Ingresá lo que hay en caja"
               />
             </label>
-            <button className="primary" disabled={busy}>
+            <button
+              className="primary"
+              disabled={
+                busy || status.loading || !!status.error || !!status.data?.length || !!remote.error
+              }
+            >
               {busy ? 'Abriendo…' : 'Abrir turno'}
             </button>
           </form>
@@ -182,7 +223,10 @@ export function ShiftScreen() {
               e.preventDefault();
               if (window.confirm('¿Cerrar tu turno con este efectivo contado?')) {
                 const d = new FormData(e.currentTarget);
-                void send('shifts/close', { countedCash: toCents(String(d.get('countedCash'))) });
+                void send('shifts/close', {
+                  shiftId: shift.id,
+                  countedCash: toCents(String(d.get('countedCash'))),
+                });
               }
             }}
           >
