@@ -96,7 +96,7 @@ export function StockScreen() {
       await fn();
       setMessage(success);
       close();
-      await Promise.all([list.refresh(), receipts.refresh()]);
+      await Promise.all([list.refresh(true), receipts.refresh(true)]);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -202,7 +202,7 @@ export function StockScreen() {
                     setMessage(
                       `Excel importado: ${result.data.count} productos procesados. El stock existente se conservó; solo se cargó el inicial de productos nuevos.`,
                     );
-                    await list.refresh();
+                    await list.refresh(true);
                   } catch (err) {
                     setError(errorMessage(err));
                   } finally {

@@ -1,5 +1,15 @@
 # Revisión de stock y precisión · 24/10/2026
 
+## Revisión adicional · 10/11/2026
+
+- Lectura consistente de producción: 930 productos, 5.359 operaciones y 4.612 movimientos. Sin diferencias de stock contra Kardex, de pagos contra totales, de ítems/costos conocidos, de descuentos por operación/producto ni claves faltantes de idempotencia. Informe privado en `data/auditoria/integridad-2026-11-10T13-07-01-583Z.json`.
+- Comprobación adicional: 341 ingresos registrados, sin faltantes de reposición en operaciones anuladas y sin productos fusionados activos. Agua caliente es el único producto activo configurado sin control de unidades; se conserva esa configuración existente.
+- Se reprodujo en navegador una carga de 5 unidades que se guardaba correctamente pero quedaba mostrando el saldo anterior por una consulta demorada. Los eventos de cambios confirmados ahora fuerzan una consulta nueva e invalidan las anteriores. Guardar/editar/importar en Stock también solicita una lectura nueva; las respuestas anteriores no pueden volver a pintar el saldo viejo.
+- Se reprodujo con un Excel sintético la reactivación incorrecta de un código fusionado. Se rechaza todo el archivo con ese código y se indica usar el producto destino. La transacción revierte también los productos procesados antes de esa fila; no altera saldos ni reactiva el origen.
+- Nuevas regresiones: dos ingresos, una venta y una edición simultáneas terminan con todas las unidades conciliadas; un reintento de ingreso no suma dos veces. La prueba de navegador retiene una lectura anterior, registra un ingreso, libera la respuesta vieja y verifica el saldo actualizado antes y después de recargar.
+- No se modificó stock, ventas, pagos, movimientos ni configuración de productos reales durante esta revisión. Las reproducciones usan exclusivamente la base local `_test`.
+- Validación de la actualización: 58 pruebas de lógica/PostgreSQL y 26 pruebas de navegador en celular y escritorio, build, TypeScript y lint aprobados. Los dos fallos corregidos se reprodujeron antes de aplicar sus soluciones.
+
 ## Correcciones verificadas
 
 - Un Excel anterior podía reemplazar el stock actual por su columna vieja. Ahora actualiza metadatos y conserva el stock de productos existentes; solo carga el saldo inicial al crear un producto nuevo. Los conteos físicos se hacen en Corregir.

@@ -1,5 +1,11 @@
 # Progreso · 24/10/2026
 
+## Revisión de persistencia y descuentos de stock · 10/11/2026
+- Auditoría de producción de solo lectura sin diferencias: 930 productos, 5.359 operaciones y 4.612 movimientos conciliados. Control adicional de anulaciones y productos fusionados sin incidencias; 341 ingresos registrados. Informes privados en `data/auditoria`, fuera de Git y del deploy.
+- Corregida una carrera comprobada de interfaz: una lectura anterior podía mostrar el stock viejo después de una carga confirmada. Se descartan respuestas superadas y se fuerza una lectura posterior a cambios confirmados. No había pérdida del ingreso en la base en la reproducción.
+- Excel: se bloquea el código de un producto fusionado y se revierte la importación completa, evitando reactivar el origen con información vieja. Se conserva el stock existente de productos normales y el alta inicial con Kardex.
+- Nuevas pruebas de concurrencia de cargas/venta/edición y rollback de Excel. Prueba de navegador con respuesta retenida, ingreso confirmado y recarga. Cache offline v16. Validación: 58 pruebas de lógica/PostgreSQL y 26 E2E aprobadas; build de producción, TypeScript, lint y formato correctos. Sin migraciones ni cambios de datos reales.
+
 ## Relevo y cierre definitivo de turnos · 10/11/2026
 - La apertura ahora exige que no haya ningún turno activo del kiosco, con bloqueo transaccional global y protección adicional en PostgreSQL. La pantalla muestra los empleados con cajas pendientes de rendición.
 - El cierre exige el ID exacto del turno y la identidad de sesión. Un reintento con el mismo efectivo devuelve el cierre original sin duplicar auditoría; un cierre viejo no puede terminar un turno nuevo. La base impide reabrir un turno cerrado o cambiarle el empleado.

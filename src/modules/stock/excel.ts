@@ -163,6 +163,12 @@ export async function importWorkbook(userId: string, buffer: ArrayBuffer) {
         reviewNote: null,
       };
       const old = await tx.product.findUnique({ where: { barcode: row.barcode } });
+      if (old?.mergedIntoId)
+        throw new AppError(
+          `El código ${row.barcode} pertenece a un producto fusionado. Actualizá el Excel con el producto destino antes de importar. No se modificó ningún producto.`,
+          409,
+          'MERGED_PRODUCT',
+        );
       const p = old
         ? await tx.product.update({ where: { id: old.id }, data })
         : await tx.product.create({ data: { ...data, barcode: row.barcode } });

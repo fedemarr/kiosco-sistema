@@ -992,6 +992,62 @@ test('turno y ventas confirmadas se recuperan en otro equipo aunque venza la ses
     await db.user.update({ where: { id: user.id }, data: { deletedAt: new Date() } });
   }
 });
+test('Stock descarta respuestas viejas despues de una carga confirmada y conserva el saldo al recargar', async ({
+  page,
+}) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  await page.goto('/stock');
+  const input = page.getByLabel('Buscar en stock');
+  await input.fill(barcode);
+  await input.press('Enter');
+  await expect(input).toHaveValue('');
+  const card = page.locator('article').filter({ hasText: barcode });
+  const before = (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock;
+  await expect(card.locator('.pill')).toContainText(`${before} en stock`);
+  let release = () => {};
+  let captured = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    captured = resolve;
+  });
+  let held = false;
+  await page.route('**/api/products?**', async (route) => {
+    if (held) return route.continue();
+    held = true;
+    const response = await route.fetch();
+    captured();
+    await gate;
+    await route.fulfill({ response });
+  });
+  try {
+    await card.getByRole('button', { name: '+ Cargar', exact: true }).click();
+    await page.evaluate(() => window.dispatchEvent(new Event('stock-change')));
+    await ready;
+    await page.getByLabel('Cantidad a sumar').fill('5');
+    await page.getByRole('button', { name: 'Registrar movimiento', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('Movimiento registrado');
+    release();
+    await expect(card.locator('.pill')).toContainText(`${before + 5} en stock`);
+    await page.unrouteAll({ behavior: 'wait' });
+    await page.reload();
+    await input.fill(barcode);
+    await input.press('Enter');
+    await expect(card.locator('.pill')).toContainText(`${before + 5} en stock`);
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+      before + 5,
+    );
+  } finally {
+    release();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
+});
+
 test('Stock limpia el buscador al encontrar, conserva el resultado y respeta el siguiente escaneo', async ({
   page,
 }) => {

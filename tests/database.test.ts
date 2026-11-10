@@ -337,6 +337,64 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
     });
     expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(7);
   });
+  it('un Excel con un código fusionado se rechaza completo sin reactivar ni modificar saldos', async () => {
+    const source = await product(3);
+    const target = await product(2);
+    await mergeProducts(owner.id, target.id, source.id);
+    const category = await db.category.findUniqueOrThrow({ where: { id: categoryId } });
+    const workbook = new ExcelJS.Workbook();
+    workbook.addWorksheet('Productos').addRows([
+      ['código', 'nombre', 'costo', 'venta', 'stock', 'mínimo', 'categoría'],
+      [target.barcode, 'Nombre de Excel que debe revertirse', 50, 100, 999, 1, category.name],
+      [source.barcode, 'Origen viejo del Excel', 50, 100, 999, 1, category.name],
+    ]);
+    const bytes = await workbook.xlsx.writeBuffer();
+    await expect(
+      importWorkbook(owner.id, Uint8Array.from(new Uint8Array(bytes)).buffer),
+    ).rejects.toMatchObject({ code: 'MERGED_PRODUCT' });
+    expect(await db.product.findUniqueOrThrow({ where: { id: target.id } })).toMatchObject({
+      stock: 5,
+      name: target.name,
+    });
+    const after = await db.product.findUniqueOrThrow({ where: { id: source.id } });
+    expect(after).toMatchObject({ stock: 0, mergedIntoId: target.id });
+    expect(after.deletedAt).not.toBeNull();
+  });
+  it('dos cargas, una venta y una edición simultáneas conservan todas las unidades', async () => {
+    const p = await product(20);
+    const input = await payload(owner, p.id, 3);
+    const receipt = { type: 'RECEIPT', quantity: 5, requestKey: crypto.randomUUID() };
+    await Promise.all([
+      adjustStock(owner.id, p.id, receipt),
+      adjustStock(owner.id, p.id, {
+        type: 'RECEIPT',
+        quantity: 7,
+        requestKey: crypto.randomUUID(),
+      }),
+      checkout(owner, input),
+      saveProduct(
+        owner.id,
+        {
+          name: p.name,
+          barcode: p.barcode,
+          categoryId,
+          cost: p.cost,
+          price: p.price,
+          minStock: 8,
+          trackStock: true,
+        },
+        p.id,
+      ),
+    ]);
+    await adjustStock(owner.id, p.id, receipt);
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(29);
+    expect(
+      (await db.stockMovement.aggregate({ where: { productId: p.id }, _sum: { quantity: true } }))
+        ._sum.quantity,
+    ).toBe(29);
+    expect(await db.stockMovement.count({ where: { productId: p.id, type: 'RECEIPT' } })).toBe(3);
+    expect(await db.stockMovement.count({ where: { productId: p.id, type: 'SALE' } })).toBe(1);
+  });
   it('un conteo abierto antes de otra carga se rechaza y conserva el ingreso', async () => {
     const p = await product(2);
     await adjustStock(owner.id, p.id, { type: 'RECEIPT', quantity: 3 });

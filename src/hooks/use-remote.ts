@@ -12,31 +12,34 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
   }>({ path: null, data: null, error: '', loading: true, updatedAt: null });
   const version = useRef(0);
   const active = useRef<{ path: string; version: number } | null>(null);
-  const refresh = useCallback(async () => {
-    if (path && active.current?.path === path) return;
-    const current = ++version.current;
-    if (!path) {
-      setState({ path, data: null, error: '', loading: false, updatedAt: null });
-      return;
-    }
-    active.current = { path, version: current };
-    try {
-      const value = await request<T>(path);
-      if (current === version.current)
-        setState({ path, data: value, error: '', loading: false, updatedAt: Date.now() });
-    } catch (e) {
-      if (current === version.current)
-        setState((old) => ({
-          path,
-          data: old.path === path ? old.data : null,
-          error: errorMessage(e),
-          loading: false,
-          updatedAt: old.path === path ? old.updatedAt : null,
-        }));
-    } finally {
-      if (active.current?.version === current) active.current = null;
-    }
-  }, [path]);
+  const refresh = useCallback(
+    async (force = false) => {
+      if (!force && path && active.current?.path === path) return;
+      const current = ++version.current;
+      if (!path) {
+        setState({ path, data: null, error: '', loading: false, updatedAt: null });
+        return;
+      }
+      active.current = { path, version: current };
+      try {
+        const value = await request<T>(path);
+        if (current === version.current)
+          setState({ path, data: value, error: '', loading: false, updatedAt: Date.now() });
+      } catch (e) {
+        if (current === version.current)
+          setState((old) => ({
+            path,
+            data: old.path === path ? old.data : null,
+            error: errorMessage(e),
+            loading: false,
+            updatedAt: old.path === path ? old.updatedAt : null,
+          }));
+      } finally {
+        if (active.current?.version === current) active.current = null;
+      }
+    },
+    [path],
+  );
   const cancel = useCallback(() => {
     version.current++;
     active.current = null;
@@ -56,17 +59,20 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
     const focus = () => {
       if (!document.hidden) void refresh();
     };
+    // Una mutación confirmada invalida incluso una lectura que todavía está en vuelo.
+    const changed = () => {
+      void refresh(true);
+    };
     const storage = (event: StorageEvent) => {
       if (event.key === SHIFT_CHANGE_KEY) {
-        cancel();
-        void refresh();
+        void refresh(true);
       }
     };
     window.addEventListener('online', focus);
     window.addEventListener('focus', focus);
-    window.addEventListener('sale-confirmed', focus);
-    window.addEventListener('stock-change', focus);
-    window.addEventListener('shift-change', focus);
+    window.addEventListener('sale-confirmed', changed);
+    window.addEventListener('stock-change', changed);
+    window.addEventListener('shift-change', changed);
     window.addEventListener('storage', storage);
     document.addEventListener('visibilitychange', focus);
     return () => {
@@ -75,9 +81,9 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
       cancel();
       window.removeEventListener('online', focus);
       window.removeEventListener('focus', focus);
-      window.removeEventListener('sale-confirmed', focus);
-      window.removeEventListener('stock-change', focus);
-      window.removeEventListener('shift-change', focus);
+      window.removeEventListener('sale-confirmed', changed);
+      window.removeEventListener('stock-change', changed);
+      window.removeEventListener('shift-change', changed);
       window.removeEventListener('storage', storage);
       document.removeEventListener('visibilitychange', focus);
     };
