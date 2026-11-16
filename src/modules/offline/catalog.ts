@@ -10,7 +10,19 @@ export type Snapshot = {
   products: Product[];
   savedAt: string;
   observedAt?: number;
+  catalogVersions?: Record<string, number>;
 };
+// Orden de inicio de lecturas compartido entre pestañas, independiente del reloj de la PC.
+export async function beginCatalogRead(userId: string) {
+  const db = await database();
+  const tx = db.transaction('snapshots', 'readwrite');
+  const key = `catalog-read:${userId}`;
+  const previous = Number(await tx.store.get(key)) || 0;
+  const next = previous + 1;
+  await tx.store.put(next, key);
+  await tx.done;
+  return next;
+}
 export async function saveSnapshot(
   user: Actor,
   shift: Shift | null,
@@ -39,6 +51,7 @@ export async function saveSnapshot(
     products: old?.products || [],
     savedAt: new Date().toISOString(),
     observedAt,
+    catalogVersions: old?.catalogVersions || {},
   };
   await tx.store.put(value, user.id);
   await tx.store.put(user.id, 'active');
@@ -53,27 +66,52 @@ export async function markShiftClosed(userId: string, shiftId: string) {
   if (snapshot?.shift?.id === shiftId) await tx.store.put({ ...snapshot, shift: null }, userId);
   await tx.done;
 }
-export async function cacheCatalog(userId: string, products: Product[]) {
+export async function cacheCatalog(userId: string, products: Product[], observation: number) {
   const db = await database();
   const tx = db.transaction('snapshots', 'readwrite');
   const current = (await tx.store.get(userId)) as Snapshot | undefined;
   if (!current) return;
   const map = new Map(current.products.map((p) => [p.id, p]));
-  for (const p of products) map.set(p.id, p);
-  await tx.store.put({ ...current, products: [...map.values()] }, userId);
+  const versions = { ...current.catalogVersions };
+  for (const p of products) {
+    if ((versions[p.id] || 0) > observation) continue;
+    map.set(p.id, p);
+    versions[p.id] = observation;
+  }
+  await tx.store.put(
+    { ...current, products: [...map.values()], catalogVersions: versions },
+    userId,
+  );
   await tx.done;
 }
 export async function warmCatalog(userId: string) {
+  const started = await beginCatalogRead(userId);
   const all: Product[] = [];
+  const versions: Record<string, number> = {};
   for (let page = 1; page <= 100; page++) {
+    const observation = page === 1 ? started : await beginCatalogRead(userId);
     const value = await request<ProductList>(`catalog?page=${page}`);
     all.push(...value.products);
+    for (const product of value.products) versions[product.id] = observation;
     if (page * 60 >= value.total) break;
   }
   const db = await database();
   const tx = db.transaction('snapshots', 'readwrite');
   const current = (await tx.store.get(userId)) as Snapshot | undefined;
-  if (current) await tx.store.put({ ...current, products: all }, userId);
+  if (current) {
+    const products = new Map(all.map((product) => [product.id, product]));
+    for (const product of current.products) {
+      const version = current.catalogVersions?.[product.id] || 0;
+      if (version > (versions[product.id] || started)) {
+        products.set(product.id, product);
+        versions[product.id] = version;
+      }
+    }
+    await tx.store.put(
+      { ...current, products: [...products.values()], catalogVersions: versions },
+      userId,
+    );
+  }
   await tx.done;
 }
 export async function readSnapshot(userId?: string): Promise<Snapshot | null> {

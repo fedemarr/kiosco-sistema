@@ -1233,6 +1233,107 @@ test('Stock conserva pendientes de versiones anteriores para revision sin aplica
   expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(1);
 });
 
+test('Caja no vuelve a cero por un catalogo viejo que termina despues de consultar el stock nuevo', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const original = await db.product.findUniqueOrThrow({ where: { id: productId } });
+  const tag = crypto.randomUUID();
+  const fresh = await db.product.create({
+    data: {
+      name: `AAA Aquarius prueba ${tag}`,
+      barcode: `AQU-${tag}`,
+      categoryId: original.categoryId,
+      cost: 5000,
+      price: 10000,
+      stock: 0,
+    },
+  });
+  // Más de una página para observar cuándo termina de guardarse el catálogo completo.
+  await db.product.createMany({
+    data: Array.from({ length: 70 }, (_, i) => ({
+      name: `ZZZ catálogo ${tag} ${i}`,
+      barcode: `${tag}-${i}`,
+      categoryId: original.categoryId,
+      price: 100,
+      stock: 0,
+      trackStock: false,
+    })),
+  });
+  let release = () => {};
+  let captured = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    captured = resolve;
+  });
+  let total = 0;
+  await page.route(
+    '**/api/catalog?page=1',
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      total = body.data.total;
+      captured();
+      await gate;
+      await route.fulfill({ response });
+    },
+    { times: 1 },
+  );
+  try {
+    await page.goto('/login');
+    await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+    await page.getByLabel('Contraseña', { exact: true }).fill(password);
+    await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+    await expect(page.getByLabel('Buscar producto')).toBeVisible();
+    await started;
+    const loaded = await page.request.post(`/api/products/${fresh.id}/movements`, {
+      headers: { Origin: baseURL! },
+      data: { type: 'RECEIPT', quantity: 5, requestKey: crypto.randomUUID() },
+    });
+    expect(loaded.status()).toBe(200);
+    await page.getByLabel('Buscar producto').fill(fresh.barcode);
+    const tile = page.locator('.product-tile').filter({ hasText: fresh.barcode });
+    await expect(tile).toContainText('Stock 5');
+    release();
+    const snapshot = () =>
+      page.evaluate(
+        async ({ userId, productId }) => {
+          const open = indexedDB.open('kiosco-pos-v1', 2);
+          const db = await new Promise<IDBDatabase>((resolve) => {
+            open.onsuccess = () => resolve(open.result);
+          });
+          const value = await new Promise<{ products: { id: string; stock: number }[] }>(
+            (resolve) => {
+              const read = db.transaction('snapshots').objectStore('snapshots').get(userId);
+              read.onsuccess = () => resolve(read.result);
+            },
+          );
+          db.close();
+          return {
+            count: value?.products.length || 0,
+            stock: value?.products.find((p) => p.id === productId)?.stock,
+          };
+        },
+        { userId: ownerId, productId: fresh.id },
+      );
+    await expect.poll(async () => (await snapshot()).count).toBeGreaterThanOrEqual(total);
+    expect((await snapshot()).stock).toBe(5);
+    await context.setOffline(true);
+    await expect(
+      page.getByText('Sin conexión · Las ventas pendientes todavía no están confirmadas'),
+    ).toBeVisible();
+    await expect(tile).toContainText('Stock 5');
+    expect((await db.product.findUniqueOrThrow({ where: { id: fresh.id } })).stock).toBe(5);
+  } finally {
+    release();
+    await context.setOffline(false);
+    await page.unrouteAll({ behavior: 'wait' });
+  }
+});
+
 test('Stock descarta respuestas viejas despues de una carga confirmada y conserva el saldo al recargar', async ({
   page,
 }) => {

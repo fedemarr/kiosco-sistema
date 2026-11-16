@@ -7,7 +7,13 @@ import type { Product, ProductList, Quick, Category, Quotation, Shift, Payment }
 import type { CartInput, CheckoutInput } from './schema';
 import { useUser } from '@/components/app-shell';
 import { enqueue, removePendingSale } from '@/modules/offline/queue';
-import { cacheCatalog, readSnapshot, saveSnapshot, warmCatalog } from '@/modules/offline/catalog';
+import {
+  beginCatalogRead,
+  cacheCatalog,
+  readSnapshot,
+  saveSnapshot,
+  warmCatalog,
+} from '@/modules/offline/catalog';
 import { matchesProduct } from '@/lib/product-search';
 import { SHIFT_CHANGE_KEY } from '@/lib/shift-events';
 type Line = {
@@ -175,12 +181,15 @@ function usePos() {
       };
       void (
         online
-          ? request<ProductList>(
-              `catalog?q=${encodeURIComponent(search)}&page=${page}&category=${category}`,
-            ).then(async (value) => {
-              await cacheCatalog(user.id, value.products).catch(() => {});
+          ? (async () => {
+              const observation = await beginCatalogRead(user.id).catch(() => 0);
+              const value = await request<ProductList>(
+                `catalog?q=${encodeURIComponent(search)}&page=${page}&category=${category}`,
+              );
+              if (observation)
+                await cacheCatalog(user.id, value.products, observation).catch(() => {});
               return value;
-            })
+            })()
           : cached()
       )
         .then((data) => {

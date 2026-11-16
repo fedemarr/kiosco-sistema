@@ -1,5 +1,13 @@
 # Revisión de stock y precisión · 24/10/2026
 
+## Aclaración del reclamo de stock en cero · 16/11/2026
+
+La revisión del jueves/viernes quedó guardada en `data/auditoria/aquarius-jueves-viernes-2026-11-12-1794856116196.json`. Los ingresos encontrados permanecían en el historial; algunas variantes también tenían conteos y ventas posteriores. No se repusieron unidades sin un conteo físico.
+
+Al probar cómo podía verse cero con stock positivo en la base, se reprodujo una carrera en la copia local: una página antigua de la descarga completa de catálogo podía sobrescribir una consulta individual posterior. Esto conserva consistencia en la base pero muestra un saldo viejo al trabajar con la copia sin conexión. La reproducción no prueba que esa fuera la causa exacta del incidente pasado en el dispositivo del cliente.
+
+La solución asigna un orden persistido al inicio de cada lectura del catálogo, compartido entre pestañas del mismo usuario. Las escrituras conservan por producto la consulta más reciente, incluso si una descarga vieja termina después o se actualiza la sesión mientras está en curso. La prueba retiene un catálogo con cero, registra unidades en la base local de pruebas, consulta el saldo nuevo y comprueba que no regrese a cero al terminar la descarga anterior ni al quedar sin conexión.
+
 ## Incidencia de cargas · 16/11/2026
 
 La lectura consistente encontró 933 productos, 6.415 operaciones y 6.692 movimientos sin diferencias. Se guardó `data/auditoria/integridad-2026-11-16T18-48-00-353Z.json`; las secuencias de ingresos/conteos se conservaron en el informe privado `cargas-stock-2026-11-16-1794855462584.json`. No se modificaron datos reales.
