@@ -23,7 +23,19 @@ const commandSchema = z
   })
   .strict();
 export type StockCommand = z.infer<typeof commandSchema>;
+const resultSchema = z.object({
+  id: z.uuid(),
+  productId: z.uuid(),
+  userId: z.uuid(),
+  requestKey: z.uuid(),
+  type: z.enum(['RECEIPT', 'COUNT']),
+  quantity: z.number().int(),
+  before: z.number().int().nonnegative(),
+  after: z.number().int().nonnegative(),
+});
+export type StockResult = z.infer<typeof resultSchema>;
 const active = new Map<string, { key: string; promise: Promise<unknown> }>();
+export const stockCommandInFlight = (userId: string) => active.has(userId);
 const changed = () => window.dispatchEvent(new Event('stock-command-change'));
 export async function pendingStockCommand(userId: string): Promise<StockCommand | null> {
   const value = await (await database()).get('stockRequests', userId);
@@ -61,22 +73,58 @@ async function send(userId: string, command: StockCommand) {
   await tx.store.put(command, userId);
   await tx.done;
   changed();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
     const { productId, productName, ...body } = command;
     void productName;
-    const result = await request(`products/${productId}/movements`, 'POST', body);
+    const response = await request<unknown>(
+      `products/${productId}/movements`,
+      'POST',
+      {
+        ...body,
+        expectedUserId: userId,
+      },
+      { signal: controller.signal },
+    );
+    const checked = resultSchema.safeParse(response);
+    if (
+      !checked.success ||
+      checked.data.requestKey !== command.requestKey ||
+      checked.data.userId !== userId ||
+      checked.data.productId !== productId ||
+      checked.data.type !== command.type ||
+      checked.data.after - checked.data.before !== checked.data.quantity ||
+      (command.type === 'RECEIPT'
+        ? checked.data.quantity !== command.quantity
+        : checked.data.after !== command.quantity)
+    )
+      throw new ApiError(
+        'No se pudo comprobar el ingreso. La solicitud sigue guardada para verificarla sin duplicar unidades.',
+        'UNCONFIRMED_STOCK',
+      );
+    const result = checked.data;
     await clear(userId, command.requestKey);
     window.dispatchEvent(new Event('stock-change'));
+    window.dispatchEvent(new CustomEvent('stock-command-confirmed', { detail: result }));
     return result;
   } catch (error) {
+    if (error instanceof SyntaxError)
+      throw new ApiError(
+        'El servidor no devolvió una confirmación válida. La carga sigue guardada y se verificará con la misma solicitud.',
+        'UNCONFIRMED_STOCK',
+      );
     if (
       error instanceof ApiError &&
       error.status &&
       error.status < 500 &&
+      command.type === 'COUNT' &&
       ![401, 403, 429].includes(error.status) &&
       error.code !== 'STOCK_REQUEST_CONFLICT'
     )
       await clear(userId, command.requestKey);
     throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }

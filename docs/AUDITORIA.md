@@ -1,5 +1,15 @@
 # Revisión de stock y precisión · 24/10/2026
 
+## Incidencia de cargas · 16/11/2026
+
+La lectura consistente encontró 933 productos, 6.415 operaciones y 6.692 movimientos sin diferencias. Se guardó `data/auditoria/integridad-2026-11-16T18-48-00-353Z.json`; las secuencias de ingresos/conteos se conservaron en el informe privado `cargas-stock-2026-11-16-1794855462584.json`. No se modificaron datos reales.
+
+En los ejemplos revisados, los ingresos estaban guardados y algunos saldos se reemplazaron después mediante `COUNT`. El formulario ahora muestra la diferencia entre agregar unidades y reemplazar el total, con motivo y confirmación explícita para el conteo. No se revierten esos conteos automáticamente: no se dispone de una comprobación física que justifique inventar cantidades.
+
+Se reforzó la recuperación de ingresos cuya respuesta se pierde o no llega: reintento automático con la misma clave, verificación del comprobante y de la sesión, y límite de espera de 30 segundos. El servidor vuelve a consultar la solicitud al resolver cualquier error transaccional para reconocer un COMMIT que sí haya quedado guardado. Una respuesta HTML o un comprobante ajeno no se toma como confirmación. Los ingresos rechazados se conservan visibles para revisión; los conteos pendientes requieren intervención explícita.
+
+Las intenciones todavía no confirmadas se conservan en IndexedDB del navegador que las inició. La recuperación automática necesita volver a abrir ese navegador con el mismo usuario y conexión; no se promete recuperar un envío que nunca llegó al servidor desde un dispositivo destruido o cuyo almacenamiento se borró. Los movimientos confirmados se guardan en la base y no dependen de esa copia local.
+
 ## Revisión adicional · 10/11/2026
 
 - Lectura consistente de producción: 930 productos, 5.359 operaciones y 4.612 movimientos. Sin diferencias de stock contra Kardex, de pagos contra totales, de ítems/costos conocidos, de descuentos por operación/producto ni claves faltantes de idempotencia. Informe privado en `data/auditoria/integridad-2026-11-10T13-07-01-583Z.json`.

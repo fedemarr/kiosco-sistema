@@ -25,6 +25,7 @@ export const movementSchema = z
     note: z.string().trim().max(500).optional(),
     requestKey: z.uuid().optional(),
     expectedStock: z.number().int().min(0).max(2147483647).optional(),
+    expectedUserId: z.uuid().optional(),
   })
   .strict();
 export async function moveStock(
@@ -133,6 +134,12 @@ export async function saveProduct(userId: string, body: unknown, id?: string) {
 }
 export async function adjustStock(userId: string, productId: string, body: unknown) {
   const input = movementSchema.parse(body);
+  if (input.expectedUserId && input.expectedUserId !== userId)
+    throw new AppError(
+      'La sesión cambió. Ingresá con el usuario que inició la carga para confirmarla.',
+      401,
+      'SESSION_CHANGED',
+    );
   const requestKey = input.requestKey || crypto.randomUUID();
   const requestHash = createHash('sha256')
     .update(
@@ -194,10 +201,10 @@ export async function adjustStock(userId: string, productId: string, body: unkno
       return movement;
     });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const previous = await replay(db);
-      if (previous) return previous;
-    }
+    // El COMMIT puede haberse confirmado aunque se pierda su respuesta.
+    // Verificar la misma clave y huella antes de informar cualquier fallo.
+    const previous = await replay(db);
+    if (previous) return previous;
     throw error;
   }
 }

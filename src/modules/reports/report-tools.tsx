@@ -47,10 +47,12 @@ export function ReportStock({
                 </small>
               </span>
               <button
+                disabled={busy}
                 onClick={() => {
                   setProduct(p);
                   requestKey.current = crypto.randomUUID();
                   setError('');
+                  setMessage('');
                   dialog.current?.showModal();
                 }}
               >
@@ -68,10 +70,20 @@ export function ReportStock({
           </p>
         )}
       </section>
-      <dialog ref={dialog} onClose={() => setProduct(null)}>
+      <dialog
+        ref={dialog}
+        onClose={() => setProduct(null)}
+        onCancel={(event) => {
+          if (busy) event.preventDefault();
+        }}
+      >
         <div className="row between">
           <h2>Ingresar stock</h2>
-          <button aria-label="Cerrar ingreso de stock" onClick={() => dialog.current?.close()}>
+          <button
+            disabled={busy}
+            aria-label="Cerrar ingreso de stock"
+            onClick={() => dialog.current?.close()}
+          >
             Cerrar
           </button>
         </div>
@@ -83,6 +95,7 @@ export function ReportStock({
               const data = new FormData(e.currentTarget);
               setBusy(true);
               setError('');
+              setMessage('');
               try {
                 await performStockCommand(user.id, {
                   productId: product.id,

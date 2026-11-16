@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -17,7 +17,8 @@ import type { Product, ProductList, Category } from '@/lib/types';
 import { money, dateTime, toCents } from '@/lib/format';
 import { useUser } from '@/components/app-shell';
 import { can } from '@/modules/auth/permissions';
-import { performStockCommand } from './commands';
+import { performStockCommand, type StockResult } from './commands';
+import { MovementForm } from './movement-form';
 type Movement = {
   id: string;
   type: string;
@@ -62,6 +63,8 @@ export function StockScreen() {
     }[]
   >(access ? 'stock-receipts' : null, 2000);
   function open(value: Modal) {
+    setMessage('');
+    setError('');
     setModal(value);
     setTimeout(() => dialog.current?.showModal(), 0);
   }
@@ -92,6 +95,7 @@ export function StockScreen() {
   async function action(fn: () => Promise<unknown>, success: string) {
     setBusy(true);
     setError('');
+    setMessage('');
     try {
       await fn();
       setMessage(success);
@@ -103,6 +107,17 @@ export function StockScreen() {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    const confirmed = (event: Event) => {
+      const result = (event as CustomEvent<StockResult>).detail;
+      if (busy || modal?.kind !== 'move' || modal.requestKey !== result.requestKey) return;
+      dialog.current?.close();
+      setModal(null);
+      setError('');
+    };
+    window.addEventListener('stock-command-confirmed', confirmed);
+    return () => window.removeEventListener('stock-command-confirmed', confirmed);
+  }, [busy, modal]);
   if (!access)
     return (
       <div className="card stack">
@@ -518,11 +533,12 @@ export function StockScreen() {
           </form>
         )}
         {modal?.kind === 'move' && (
-          <form
-            className="stack"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const d = new FormData(e.currentTarget);
+          <MovementForm
+            key={modal.requestKey}
+            product={modal.product}
+            type={modal.type}
+            busy={busy}
+            onSubmit={(quantity, note) => {
               void action(
                 () =>
                   performStockCommand(user.id, {
@@ -531,32 +547,13 @@ export function StockScreen() {
                     type: modal.type,
                     requestKey: modal.requestKey,
                     ...(modal.type === 'COUNT' ? { expectedStock: modal.product.stock } : {}),
-                    quantity: Number(d.get('quantity')),
-                    note: String(d.get('note') || '') || undefined,
+                    quantity,
+                    note,
                   }),
                 'Movimiento registrado en el Kardex.',
               );
             }}
-          >
-            <strong>{modal.product.name}</strong>
-            <p className="muted">Stock actual: {modal.product.stock}</p>
-            <label>
-              {modal.type === 'RECEIPT' ? 'Cantidad a sumar' : 'Cantidad contada'}
-              <input
-                name="quantity"
-                type="number"
-                min={modal.type === 'RECEIPT' ? 1 : 0}
-                required
-              />
-            </label>
-            <label>
-              Motivo / remito (obligatorio si baja)
-              <input name="note" maxLength={500} />
-            </label>
-            <button className="primary" disabled={busy}>
-              Registrar movimiento
-            </button>
-          </form>
+          />
         )}
         {modal?.kind === 'history' && <HistoryView id={modal.product.id} />}{' '}
         {modal?.kind === 'merge' && (

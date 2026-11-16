@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { quote, checkout, voidOperation } from '@/modules/sales/service';
 import { adjustStock, saveProduct, mergeProducts, listProducts } from '@/modules/stock/service';
@@ -336,6 +336,45 @@ describe.skipIf(!enabled)('PostgreSQL real: atomicidad, idempotencia y caja', ()
       code: 'STOCK_REQUEST_CONFLICT',
     });
     expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(7);
+  });
+  it('una respuesta de COMMIT perdida reconoce el ingreso ya guardado sin duplicarlo', async () => {
+    const p = await product(0);
+    const command = { type: 'RECEIPT', quantity: 9, requestKey: crypto.randomUUID() };
+    const original = db.$transaction.bind(db);
+    const lost = vi.spyOn(db, '$transaction').mockImplementationOnce(async (fn, options) => {
+      await original(fn, options);
+      throw new Error('Simulated lost COMMIT response');
+    });
+    try {
+      const movement = await adjustStock(owner.id, p.id, command);
+      expect(movement).toMatchObject({ requestKey: command.requestKey, quantity: 9, after: 9 });
+    } finally {
+      lost.mockRestore();
+    }
+    await adjustStock(owner.id, p.id, command);
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(9);
+    expect(await db.stockMovement.count({ where: { productId: p.id } })).toBe(1);
+  });
+  it('una carga pendiente de otro usuario no se aplica al cambiar la sesión', async () => {
+    const p = await product(2);
+    const requestKey = crypto.randomUUID();
+    await expect(
+      adjustStock(seller.id, p.id, {
+        type: 'RECEIPT',
+        quantity: 8,
+        requestKey,
+        expectedUserId: owner.id,
+      }),
+    ).rejects.toMatchObject({ code: 'SESSION_CHANGED', status: 401 });
+    expect(await db.stockMovement.count({ where: { requestKey } })).toBe(0);
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(2);
+    await adjustStock(owner.id, p.id, {
+      type: 'RECEIPT',
+      quantity: 8,
+      requestKey,
+      expectedUserId: owner.id,
+    });
+    expect((await db.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(10);
   });
   it('un Excel con un código fusionado se rechaza completo sin reactivar ni modificar saldos', async () => {
     const source = await product(3);

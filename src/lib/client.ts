@@ -8,7 +8,12 @@ export class ApiError extends Error {
     super(message);
   }
 }
-export async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function request<T>(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/${path}`, {
@@ -16,6 +21,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown): 
       cache: 'no-store',
       headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: options?.signal,
     });
   } catch {
     throw new ApiError('Sin conexión: la operación no fue confirmada por el servidor.', 'NETWORK');

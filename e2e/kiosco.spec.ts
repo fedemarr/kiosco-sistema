@@ -682,12 +682,11 @@ test('respuestas perdidas y recargas no duplican una venta ni una carga de merca
     .toBe(startStock + 2);
   await page.reload();
   await expect(
-    page.getByText('Carga de stock pendiente de confirmación', { exact: true }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Confirmar estado de la carga', exact: true }).click();
-  await expect(
     page.getByText('Movimiento de stock confirmado. Se registró una sola vez.', { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByText('Carga de stock pendiente de confirmación', { exact: true }),
+  ).toHaveCount(0);
   expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
     startStock + 2,
   );
@@ -992,6 +991,191 @@ test('turno y ventas confirmadas se recuperan en otro equipo aunque venza la ses
     await db.user.update({ where: { id: user.id }, data: { deletedAt: new Date() } });
   }
 });
+test('Stock recupera ingresos sin respuesta valida y verifica el comprobante antes de confirmar', async ({
+  page,
+}) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  await page.goto('/stock');
+  const search = page.getByLabel('Buscar en stock');
+  await search.fill(barcode);
+  await search.press('Enter');
+  await expect(search).toHaveValue('');
+  const card = page.locator('article').filter({ hasText: barcode });
+  const before = (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock;
+  let key = '';
+  await page.route(
+    `**/api/products/${productId}/movements`,
+    async (route) => {
+      key = route.request().postDataJSON().requestKey;
+      await route.fulfill({
+        status: 503,
+        contentType: 'text/html',
+        body: '<html>Unavailable</html>',
+      });
+    },
+    { times: 1 },
+  );
+  await card.getByRole('button', { name: '+ Cargar', exact: true }).click();
+  await page.getByLabel('Cantidad a sumar').fill('7');
+  await expect(page.getByLabel('Resultado del movimiento')).toContainText('Se suman 7 unidades');
+  await page.getByRole('button', { name: 'Registrar movimiento', exact: true }).click();
+  await expect(page.locator('dialog [role="alert"]')).toContainText('confirmación válida');
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(before);
+  await page.reload();
+  await expect(
+    page.getByText('Movimiento de stock confirmado. Se registró una sola vez.', { exact: true }),
+  ).toBeVisible();
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(before + 7);
+  expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(1);
+  await search.fill(barcode);
+  await search.press('Enter');
+  await expect(search).toHaveValue('');
+  await page.route(
+    `**/api/products/${productId}/movements`,
+    async (route) => {
+      key = route.request().postDataJSON().requestKey;
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      const result = await response.json();
+      result.data.requestKey = crypto.randomUUID();
+      await route.fulfill({ response, json: result });
+    },
+    { times: 1 },
+  );
+  await card.getByRole('button', { name: '+ Cargar', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveCount(0);
+  await page.getByLabel('Cantidad a sumar').fill('4');
+  await page.getByRole('button', { name: 'Registrar movimiento', exact: true }).click();
+  await expect(page.locator('dialog [role="alert"]')).toContainText('No se pudo comprobar');
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+    before + 11,
+  );
+  await page.reload();
+  await expect(
+    page.getByText('Movimiento de stock confirmado. Se registró una sola vez.', { exact: true }),
+  ).toBeVisible();
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+    before + 11,
+  );
+  expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(1);
+  await page.clock.install();
+  await search.fill(barcode);
+  await search.press('Enter');
+  await expect(search).toHaveValue('');
+  let release = () => {};
+  let captured = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    captured = resolve;
+  });
+  await page.route(
+    `**/api/products/${productId}/movements`,
+    async (route) => {
+      key = route.request().postDataJSON().requestKey;
+      captured();
+      await gate;
+      await route.abort('failed').catch(() => {});
+    },
+    { times: 1 },
+  );
+  try {
+    await card.getByRole('button', { name: '+ Cargar', exact: true }).click();
+    await page.getByLabel('Cantidad a sumar').fill('3');
+    await page.getByRole('button', { name: 'Registrar movimiento', exact: true }).click();
+    await started;
+    await page.clock.fastForward(30001);
+    await expect(page.locator('dialog [role="alert"]')).toContainText('Sin conexión');
+    expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(0);
+    release();
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await expect(
+      page.getByText('Movimiento de stock confirmado. Se registró una sola vez.', { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
+    expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+      before + 14,
+    );
+    expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(1);
+  } finally {
+    release();
+  }
+});
+
+test('Stock exige confirmar el reemplazo por conteo y no reintenta conteos automaticamente', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  await page.goto('/stock');
+  const search = page.getByLabel('Buscar en stock');
+  await search.fill(barcode);
+  await search.press('Enter');
+  await expect(search).toHaveValue('');
+  const card = page.locator('article').filter({ hasText: barcode });
+  const before = (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock;
+  const target = Math.max(0, before - 1);
+  await card.getByRole('button', { name: 'Corregir', exact: true }).click();
+  await page.getByLabel('Cantidad contada').fill(String(target));
+  await expect(page.getByLabel('Resultado del movimiento')).toContainText(
+    `Se reemplaza ${before} por ${target}`,
+  );
+  const save = page.getByRole('button', { name: 'Confirmar reemplazo del stock', exact: true });
+  await expect(save).toBeDisabled();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    .toBe(true);
+  await page.screenshot({
+    path: `.screenshots/stock-conteo-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
+  await page.getByLabel('Cantidad contada').press('Enter');
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(before);
+  await page.getByLabel('Motivo / remito', { exact: false }).fill('Conteo físico de prueba');
+  await page
+    .getByRole('checkbox', { name: 'Confirmo que conté el stock físico', exact: false })
+    .check();
+  let key = '';
+  await page.route(
+    `**/api/products/${productId}/movements`,
+    async (route) => {
+      key = route.request().postDataJSON().requestKey;
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: false,
+          error: { code: 'INTERNAL', message: 'No se confirmó el conteo de prueba' },
+        }),
+      });
+    },
+    { times: 1 },
+  );
+  await save.click();
+  await expect(page.locator('dialog [role="alert"]')).toContainText('No se confirmó');
+  await page.reload();
+  await expect(page.getByText(`Conteo: ${target} unidades`, { exact: false })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Confirmar estado de la carga', exact: true }),
+  ).toBeEnabled();
+  expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(0);
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(before);
+  await page.getByRole('button', { name: 'Confirmar estado de la carga', exact: true }).click();
+  await expect(
+    page.getByText('Movimiento de stock confirmado. Se registró una sola vez.', { exact: true }),
+  ).toBeVisible();
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(target);
+  expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(1);
+});
+
 test('Stock descarta respuestas viejas despues de una carga confirmada y conserva el saldo al recargar', async ({
   page,
 }) => {
