@@ -84,6 +84,12 @@ export async function cacheCatalog(userId: string, products: Product[], observat
   );
   await tx.done;
 }
+export async function fetchCatalog(userId: string, path: string) {
+  const observation = await beginCatalogRead(userId).catch(() => 0);
+  const value = await request<ProductList>(path);
+  if (observation) await cacheCatalog(userId, value.products, observation).catch(() => {});
+  return value;
+}
 export async function warmCatalog(userId: string) {
   const started = await beginCatalogRead(userId);
   const all: Product[] = [];

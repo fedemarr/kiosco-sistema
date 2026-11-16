@@ -8,6 +8,8 @@ Al probar cómo podía verse cero con stock positivo en la base, se reprodujo un
 
 La solución asigna un orden persistido al inicio de cada lectura del catálogo, compartido entre pestañas del mismo usuario. Las escrituras conservan por producto la consulta más reciente, incluso si una descarga vieja termina después o se actualiza la sesión mientras está en curso. La prueba retiene un catálogo con cero, registra unidades en la base local de pruebas, consulta el saldo nuevo y comprueba que no regrese a cero al terminar la descarga anterior ni al quedar sin conexión.
 
+La consulta del lector por Enter también actualiza la copia local bajo ese orden. La regresión comprueba una segunda carga consultada únicamente mediante el lector mientras falla la consulta general; el catálogo anterior tampoco puede borrar ese último saldo.
+
 ## Incidencia de cargas · 16/11/2026
 
 La lectura consistente encontró 933 productos, 6.415 operaciones y 6.692 movimientos sin diferencias. Se guardó `data/auditoria/integridad-2026-11-16T18-48-00-353Z.json`; las secuencias de ingresos/conteos se conservaron en el informe privado `cargas-stock-2026-11-16-1794855462584.json`. No se modificaron datos reales.

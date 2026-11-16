@@ -1297,6 +1297,20 @@ test('Caja no vuelve a cero por un catalogo viejo que termina despues de consult
     await page.getByLabel('Buscar producto').fill(fresh.barcode);
     const tile = page.locator('.product-tile').filter({ hasText: fresh.barcode });
     await expect(tile).toContainText('Stock 5');
+    expect(
+      (
+        await page.request.post(`/api/products/${fresh.id}/movements`, {
+          headers: { Origin: baseURL! },
+          data: { type: 'RECEIPT', quantity: 2, requestKey: crypto.randomUUID() },
+        })
+      ).status(),
+    ).toBe(200);
+    // Solo el lector tiene el saldo más nuevo; la consulta general posterior se interrumpe.
+    await page.route('**/api/catalog?q=&page=1&category=', (route) => route.abort('failed'), {
+      times: 1,
+    });
+    await page.getByLabel('Buscar producto').press('Enter');
+    await expect(page.locator('.pos-cart-row').filter({ hasText: fresh.name })).toBeVisible();
     release();
     const snapshot = () =>
       page.evaluate(
@@ -1320,13 +1334,14 @@ test('Caja no vuelve a cero por un catalogo viejo que termina despues de consult
         { userId: ownerId, productId: fresh.id },
       );
     await expect.poll(async () => (await snapshot()).count).toBeGreaterThanOrEqual(total);
-    expect((await snapshot()).stock).toBe(5);
+    expect((await snapshot()).stock).toBe(7);
     await context.setOffline(true);
     await expect(
       page.getByText('Sin conexión · Las ventas pendientes todavía no están confirmadas'),
     ).toBeVisible();
-    await expect(tile).toContainText('Stock 5');
-    expect((await db.product.findUniqueOrThrow({ where: { id: fresh.id } })).stock).toBe(5);
+    await page.getByLabel('Buscar producto').fill(fresh.barcode);
+    await expect(tile).toContainText('Stock 7');
+    expect((await db.product.findUniqueOrThrow({ where: { id: fresh.id } })).stock).toBe(7);
   } finally {
     release();
     await context.setOffline(false);

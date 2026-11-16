@@ -3,17 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PosScreen } from './pos-screen';
 import { request, errorMessage, ApiError } from '@/lib/client';
 import { money, isNight, toCents, nextTariffDelay } from '@/lib/format';
-import type { Product, ProductList, Quick, Category, Quotation, Shift, Payment } from '@/lib/types';
+import type { Product, Quick, Category, Quotation, Shift, Payment } from '@/lib/types';
 import type { CartInput, CheckoutInput } from './schema';
 import { useUser } from '@/components/app-shell';
 import { enqueue, removePendingSale } from '@/modules/offline/queue';
-import {
-  beginCatalogRead,
-  cacheCatalog,
-  readSnapshot,
-  saveSnapshot,
-  warmCatalog,
-} from '@/modules/offline/catalog';
+import { fetchCatalog, readSnapshot, saveSnapshot, warmCatalog } from '@/modules/offline/catalog';
 import { matchesProduct } from '@/lib/product-search';
 import { SHIFT_CHANGE_KEY } from '@/lib/shift-events';
 type Line = {
@@ -181,15 +175,10 @@ function usePos() {
       };
       void (
         online
-          ? (async () => {
-              const observation = await beginCatalogRead(user.id).catch(() => 0);
-              const value = await request<ProductList>(
-                `catalog?q=${encodeURIComponent(search)}&page=${page}&category=${category}`,
-              );
-              if (observation)
-                await cacheCatalog(user.id, value.products, observation).catch(() => {});
-              return value;
-            })()
+          ? fetchCatalog(
+              user.id,
+              `catalog?q=${encodeURIComponent(search)}&page=${page}&category=${category}`,
+            )
           : cached()
       )
         .then((data) => {
@@ -393,7 +382,7 @@ function usePos() {
     setScanning(scanCount.current);
     try {
       const candidates = online
-        ? (await request<ProductList>('catalog?q=' + encodeURIComponent(query))).products
+        ? (await fetchCatalog(user.id, 'catalog?q=' + encodeURIComponent(query))).products
         : ((await readSnapshot(user.id))?.products || []).filter((p) => matchesProduct(p, query));
       const p =
         candidates.find((p) => p.barcode.toLowerCase() === query.toLowerCase()) ||
