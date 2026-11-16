@@ -20,6 +20,8 @@ const commandSchema = z
     quantity: z.number().int().nonnegative(),
     note: z.string().optional(),
     expectedStock: z.number().int().nonnegative().optional(),
+    recoveryVersion: z.literal(1).optional(),
+    queuedAt: z.iso.datetime().optional(),
   })
   .strict();
 export type StockCommand = z.infer<typeof commandSchema>;
@@ -64,20 +66,34 @@ async function send(userId: string, command: StockCommand) {
   const db = await database();
   const tx = db.transaction('stockRequests', 'readwrite');
   const pending = await tx.store.get(userId);
-  if (pending && JSON.stringify(pending) !== JSON.stringify(command)) {
+  const identity = (value: StockCommand) =>
+    JSON.stringify({
+      productId: value.productId,
+      requestKey: value.requestKey,
+      type: value.type,
+      quantity: value.quantity,
+      note: value.note || null,
+      expectedStock: value.expectedStock ?? null,
+    });
+  if (pending && identity(pending) !== identity(command)) {
     await tx.done;
     throw new Error(
       'Hay una carga pendiente de confirmación. Usá «Confirmar estado de la carga» antes de iniciar otra.',
     );
   }
-  await tx.store.put(command, userId);
+  await tx.store.put(
+    { ...command, recoveryVersion: 1, queuedAt: pending?.queuedAt || new Date().toISOString() },
+    userId,
+  );
   await tx.done;
   changed();
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
-    const { productId, productName, ...body } = command;
+    const { productId, productName, recoveryVersion, queuedAt, ...body } = command;
     void productName;
+    void recoveryVersion;
+    void queuedAt;
     const response = await request<unknown>(
       `products/${productId}/movements`,
       'POST',

@@ -69,7 +69,12 @@ export function StockRecovery({ userId }: { userId: string }) {
       void refresh()
         .then((command) => {
           // Sumar mercadería es idempotente; un conteo pendiente exige revisión manual.
-          if (!disposed && command?.type === 'RECEIPT' && paused.current !== command.requestKey)
+          if (
+            !disposed &&
+            command?.type === 'RECEIPT' &&
+            command.recoveryVersion === 1 &&
+            paused.current !== command.requestKey
+          )
             void recover(command);
         })
         .catch(() => {});
@@ -124,7 +129,9 @@ export function StockRecovery({ userId }: { userId: string }) {
       </span>
       <small>
         {pending.type === 'RECEIPT'
-          ? 'La carga está guardada en este navegador. Se reintenta automáticamente con conexión y con la misma solicitud, sin sumar dos veces. Todavía no está confirmada por el servidor.'
+          ? pending.recoveryVersion === 1
+            ? 'La carga está guardada en este navegador. Se reintenta automáticamente con conexión y con la misma solicitud, sin sumar dos veces. Todavía no está confirmada por el servidor. Si el servidor la rechaza, se conserva para revisión.'
+            : 'Esta carga quedó pendiente en una versión anterior. Revisá si ya se resolvió antes de confirmar su reenvío. No se aplica automáticamente.'
           : 'El conteo no se aplica automáticamente: verificá el saldo antes de confirmar. La misma solicitud evita registrar dos veces un conteo ya guardado.'}
       </small>
       {error && (

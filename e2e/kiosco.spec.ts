@@ -1176,6 +1176,63 @@ test('Stock exige confirmar el reemplazo por conteo y no reintenta conteos autom
   expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(1);
 });
 
+test('Stock conserva pendientes de versiones anteriores para revision sin aplicarlos automaticamente', async ({
+  page,
+}) => {
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  const product = await db.product.findUniqueOrThrow({ where: { id: productId } });
+  const key = crypto.randomUUID();
+  await page.evaluate(
+    async ({ userId, product, key }) => {
+      const open = indexedDB.open('kiosco-stock-commands-v1', 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('stockRequests');
+      const db = await new Promise<IDBDatabase>((resolve) => {
+        open.onsuccess = () => resolve(open.result);
+      });
+      const tx = db.transaction('stockRequests', 'readwrite');
+      tx.objectStore('stockRequests').put(
+        {
+          productId: product.id,
+          productName: product.name,
+          requestKey: key,
+          type: 'RECEIPT',
+          quantity: 2,
+        },
+        userId,
+      );
+      await new Promise<void>((resolve) => {
+        tx.oncomplete = () => resolve();
+      });
+      db.close();
+    },
+    { userId: ownerId, product: { id: product.id, name: product.name }, key },
+  );
+  await page.reload();
+  await expect(
+    page.getByText('Esta carga quedó pendiente en una versión anterior.', { exact: false }),
+  ).toBeVisible();
+  expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(0);
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+    product.stock,
+  );
+  await page.getByRole('button', { name: 'Confirmar estado de la carga', exact: true }).click();
+  await expect(
+    page.getByText('Movimiento de stock confirmado. Se registró una sola vez.', { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText('Carga de stock pendiente de confirmación', { exact: true }),
+  ).toHaveCount(0);
+  expect((await db.product.findUniqueOrThrow({ where: { id: productId } })).stock).toBe(
+    product.stock + 2,
+  );
+  expect(await db.stockMovement.count({ where: { requestKey: key } })).toBe(1);
+});
+
 test('Stock descarta respuestas viejas despues de una carga confirmada y conserva el saldo al recargar', async ({
   page,
 }) => {

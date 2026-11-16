@@ -8,6 +8,8 @@ En los ejemplos revisados, los ingresos estaban guardados y algunos saldos se re
 
 Se reforzó la recuperación de ingresos cuya respuesta se pierde o no llega: reintento automático con la misma clave, verificación del comprobante y de la sesión, y límite de espera de 30 segundos. El servidor vuelve a consultar la solicitud al resolver cualquier error transaccional para reconocer un COMMIT que sí haya quedado guardado. Una respuesta HTML o un comprobante ajeno no se toma como confirmación. Los ingresos rechazados se conservan visibles para revisión; los conteos pendientes requieren intervención explícita.
 
+Los pendientes creados por versiones anteriores no se reenvían automáticamente: no se conoce si se resolvieron manualmente. Se conservan para revisión y confirmación explícita. Los nuevos ingresos guardan su versión de recuperación y fecha local para habilitar el reintento automático. Esos metadatos no cambian la identidad ni la huella de las solicitudes ya registradas en la base.
+
 Las intenciones todavía no confirmadas se conservan en IndexedDB del navegador que las inició. La recuperación automática necesita volver a abrir ese navegador con el mismo usuario y conexión; no se promete recuperar un envío que nunca llegó al servidor desde un dispositivo destruido o cuyo almacenamiento se borró. Los movimientos confirmados se guardan en la base y no dependen de esa copia local.
 
 ## Revisión adicional · 10/11/2026
