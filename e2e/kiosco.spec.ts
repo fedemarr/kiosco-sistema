@@ -11,6 +11,7 @@ let sellerLogin: string;
 let sellerName: string;
 let productId: string;
 let barcode: string;
+
 test.beforeAll(async () => {
   if (!new URL(process.env.DATABASE_URL!).pathname.endsWith('_test'))
     throw new Error('E2E requiere base de pruebas.');
@@ -1584,4 +1585,102 @@ test('búsqueda flexible, ingresos confirmados, cobro justo y detalle del turno'
       })
     ).status(),
   ).toBe(200);
+});
+
+test('Stock recupera una consulta trabada al volver y no restaura el cero anterior', async ({
+  page,
+  baseURL,
+}) => {
+  const category = await db.category.findFirstOrThrow();
+  const fresh = await db.product.create({
+    data: {
+      name: `Aquarius lectura ${crypto.randomUUID()}`,
+      barcode: crypto.randomUUID(),
+      categoryId: category.id,
+      price: 10000,
+      cost: 5000,
+      stock: 0,
+      minStock: 1,
+    },
+  });
+  await page.goto('/login');
+  await page.getByLabel('Usuario', { exact: true }).fill(ownerLogin);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Ingresar al kiosco' }).click();
+  await expect(page.getByLabel('Buscar producto')).toBeVisible();
+  await page.goto('/stock');
+  await page.getByLabel('Buscar en stock').fill(fresh.barcode);
+  const card = page.locator('article.card').filter({ hasText: fresh.barcode });
+  await expect(card.locator('.pill')).toContainText('0 en stock');
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let captured!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    captured = resolve;
+  });
+  await page.route(
+    '**/api/products?**',
+    async (route) => {
+      const response = await route.fetch();
+      captured();
+      await held;
+      await route.fulfill({ response }).catch(() => {});
+    },
+    { times: 1 },
+  );
+  try {
+    await page.evaluate(() => window.dispatchEvent(new Event('stock-change')));
+    await ready;
+    const saved = await page.request.post(`/api/products/${fresh.id}/movements`, {
+      headers: { Origin: baseURL! },
+      data: { type: 'RECEIPT', quantity: 5, requestKey: crypto.randomUUID() },
+    });
+    expect(saved.status()).toBe(200);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(card.locator('.pill')).toContainText('5 en stock', { timeout: 4000 });
+    release();
+    await expect(card.locator('.pill')).toContainText('5 en stock');
+    await page.reload();
+    await page.getByLabel('Buscar en stock').fill(fresh.barcode);
+    await expect(card.locator('.pill')).toContainText('5 en stock');
+    expect((await db.product.findUniqueOrThrow({ where: { id: fresh.id } })).stock).toBe(5);
+    expect(await db.stockMovement.count({ where: { productId: fresh.id } })).toBe(1);
+    await page.clock.install();
+    let unblock!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    let started!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    await page.route(
+      '**/api/products?**',
+      async (route) => {
+        started();
+        await blocked;
+        await route.abort().catch(() => {});
+      },
+      { times: 1 },
+    );
+    try {
+      await page.evaluate(() => window.dispatchEvent(new Event('stock-change')));
+      await waiting;
+      await page.clock.fastForward(21000);
+      await expect(page.getByLabel('Actualización del inventario')).toContainText(
+        'pueden estar desactualizados',
+      );
+      await page.getByRole('button', { name: 'Actualizar stock', exact: true }).click();
+      await expect(page.getByLabel('Actualización del inventario')).toContainText(
+        'Stock consultado:',
+      );
+      await expect(card.locator('.pill')).toContainText('5 en stock');
+    } finally {
+      unblock();
+    }
+  } finally {
+    release();
+  }
 });

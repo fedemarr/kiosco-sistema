@@ -1,5 +1,15 @@
 # Revisión de stock y precisión · 24/10/2026
 
+## Consulta trabada en pantalla Stock · 17/11/2026
+
+El cliente aclaró que observó cero en Stock. Esa pantalla consulta la API de productos directamente y no usa el catálogo offline de Caja. Por lo tanto, la carrera corregida el 16/11 no demuestra la causa del incidente histórico en Stock.
+
+Se reprodujo otro defecto: con un saldo cero ya mostrado, una actualización podía quedar sin respuesta; un ingreso posterior confirmado por otra petición no aparecía al volver a la ventana porque el hook ignoraba el refresco mientras existía una lectura pendiente. La prueba esperaba cinco unidades y recibía cero, pese al ingreso persistido en PostgreSQL local de pruebas.
+
+Las consultas ahora se cancelan a los 20 segundos. Volver a la ventana, reconectar y actualizar manualmente sustituyen una lectura pendiente, sin permitir que la respuesta anterior reemplace el resultado reciente. Se conserva el contenido de formularios durante las actualizaciones de fondo. La pantalla indica cuándo se consultó el saldo y advierte cuando no se pudo verificar su actualidad. No se cambió ninguna cantidad de producción ni se borraron pendientes locales. Esta reproducción prueba un fallo que puede producir el síntoma, sin identificar retrospectivamente qué pasó en el equipo del cliente.
+
+Verificación: 36 E2E aprobadas en celular/escritorio, 60 pruebas de lógica/PostgreSQL, build/TypeScript, lint y formato correctos. Lectura consistente de producción del 17/11: 933 productos, 6.528 operaciones y 6.883 movimientos sin diferencias; informe privado en `data/auditoria/integridad-2026-11-17T13-10-35-186Z.json`. Next actualizado a 16.4.6; auditoría de dependencias de producción sin vulnerabilidades reportadas.
+
 ## Aclaración del reclamo de stock en cero · 16/11/2026
 
 La revisión del jueves/viernes quedó guardada en `data/auditoria/aquarius-jueves-viernes-2026-11-12-1794856116196.json`. Los ingresos encontrados permanecían en el historial; algunas variantes también tenían conteos y ventas posteriores. No se repusieron unidades sin un conteo físico.

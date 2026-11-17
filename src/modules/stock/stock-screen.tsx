@@ -157,6 +157,23 @@ export function StockScreen() {
           Nuevo producto
         </button>
       </header>
+      <div
+        className="row between"
+        role="region"
+        aria-live="polite"
+        aria-label="Actualización del inventario"
+      >
+        <p className="muted">
+          {list.error
+            ? 'No se pudo verificar el stock actual. Los saldos visibles pueden estar desactualizados.'
+            : list.loading || list.refreshing
+              ? 'Consultando el stock guardado…'
+              : list.updatedAt
+                ? `Stock consultado: ${dateTime(new Date(list.updatedAt).toISOString())}`
+                : 'Esperando consultar el stock guardado.'}
+        </p>
+        <button onClick={() => void list.refresh(true)}>Actualizar stock</button>
+      </div>
       {message && (
         <p className="success" role="status">
           {message}

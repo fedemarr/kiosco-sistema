@@ -1,5 +1,13 @@
 # Progreso · 24/10/2026
 
+## Pantalla Stock: consultas trabadas y saldos viejos · 17/11/2026
+- El cliente precisó que el cero se veía en Stock, no en Caja. La corrección del catálogo offline del 16/11 no se considera prueba de la causa de ese caso histórico.
+- Reproducción independiente en Stock: saldo visible cero, lectura retenida, ingreso confirmado de cinco unidades por otra petición y regreso a la ventana. El refresco descartaba la nueva consulta porque la anterior seguía en vuelo; la prueba fallaba mostrando cero con cinco unidades persistidas.
+- Las lecturas tienen un límite de 20 segundos. Volver a la ventana, reconectar o actualizar explícitamente cancela la consulta anterior e inicia otra, manteniendo la protección de versiones para descartar respuestas tardías. El refresco de fondo conserva los formularios y no cambia su estado de carga inicial.
+- Stock muestra la fecha/hora de consulta, el estado de actualización y un aviso explícito si no se pudo verificar el saldo, además del botón Actualizar stock. No se modifica el stock real ni se borra almacenamiento de operaciones pendientes. Cache offline v20.
+- Validación: 36 E2E aprobadas contra build de producción en celular/escritorio, incluidas consulta trabada, respuesta vieja, recarga, espera agotada y actualización manual; 60 pruebas de lógica/PostgreSQL aprobadas. Build/TypeScript, lint, formato y diff correctos. Parche de mantenimiento Next 16.4.6 por aviso GHSA-mfr8-8qww-v76h; auditoría de dependencias de producción sin vulnerabilidades reportadas. No se encontraron usos de la combinación de cachés afectada en src.
+- Integridad real de solo lectura al 17/11: 933 productos, 6.528 operaciones y 6.883 movimientos sin diferencias de stock/Kardex, pagos, ítems ni claves faltantes. Informe privado en `data/auditoria/integridad-2026-11-17T13-10-35-186Z.json`. Sin migraciones ni escrituras de cantidades reales.
+
 ## Saldo cero por catálogo local desactualizado · 16/11/2026
 - Tras aclararse que el reclamo era stock en cero, se revisaron todas las variantes de Aquarius del jueves/viernes indicado. Las variantes con ingreso guardado mantenían saldos positivos al cierre del viernes; movimientos y detalle por producto se conservaron solo en el informe privado local. No se alteraron cantidades reales ni se asumió que esa lectura identificara por sí sola lo visto en el equipo del cliente.
 - Se reprodujo un fallo adicional independiente: una descarga completa del catálogo iniciada con stock cero podía terminar después de una consulta más reciente con unidades cargadas y sobrescribirla en IndexedDB. En la prueba, la base conservaba el ingreso y la copia local regresaba a cero.

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { request, errorMessage } from '@/lib/client';
 import { SHIFT_CHANGE_KEY } from '@/lib/shift-events';
 export function useRemote<T>(path: string | null, refreshInterval = 15000) {
+  const [refreshing, setRefreshing] = useState(false);
   const [state, setState] = useState<{
     path: string | null;
     data: T | null;
@@ -11,18 +12,26 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
     updatedAt: number | null;
   }>({ path: null, data: null, error: '', loading: true, updatedAt: null });
   const version = useRef(0);
-  const active = useRef<{ path: string; version: number } | null>(null);
+  const active = useRef<{ path: string; version: number; controller: AbortController } | null>(
+    null,
+  );
   const refresh = useCallback(
     async (force = false) => {
       if (!force && path && active.current?.path === path) return;
       const current = ++version.current;
+      active.current?.controller.abort();
       if (!path) {
+        active.current = null;
+        setRefreshing(false);
         setState({ path, data: null, error: '', loading: false, updatedAt: null });
         return;
       }
-      active.current = { path, version: current };
+      const controller = new AbortController();
+      active.current = { path, version: current, controller };
+      const timeout = window.setTimeout(() => controller.abort(), 20000);
+      setRefreshing(true);
       try {
-        const value = await request<T>(path);
+        const value = await request<T>(path, 'GET', undefined, { signal: controller.signal });
         if (current === version.current)
           setState({ path, data: value, error: '', loading: false, updatedAt: Date.now() });
       } catch (e) {
@@ -35,6 +44,8 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
             updatedAt: old.path === path ? old.updatedAt : null,
           }));
       } finally {
+        window.clearTimeout(timeout);
+        if (current === version.current) setRefreshing(false);
         if (active.current?.version === current) active.current = null;
       }
     },
@@ -42,11 +53,13 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
   );
   const cancel = useCallback(() => {
     version.current++;
+    active.current?.controller.abort();
     active.current = null;
   }, []);
   const setData = useCallback(
     (data: T | null) => {
       cancel();
+      setRefreshing(false);
       setState({ path, data, error: '', loading: false, updatedAt: Date.now() });
     },
     [cancel, path],
@@ -57,7 +70,8 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
       if (!document.hidden && navigator.onLine) void refresh();
     }, refreshInterval);
     const focus = () => {
-      if (!document.hidden) void refresh();
+      // Al volver o reconectar, una lectura colgada no puede bloquear datos nuevos.
+      if (!document.hidden) void refresh(true);
     };
     // Una mutación confirmada invalida incluso una lectura que todavía está en vuelo.
     const changed = () => {
@@ -95,5 +109,6 @@ export function useRemote<T>(path: string | null, refreshInterval = 15000) {
     refresh,
     setData,
     updatedAt: state.path === path ? state.updatedAt : null,
+    refreshing,
   };
 }

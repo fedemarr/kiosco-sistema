@@ -1,4 +1,4 @@
-const CACHE = 'kiosco-static-v19';
+const CACHE = 'kiosco-static-v20';
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache=await caches.open(CACHE);
